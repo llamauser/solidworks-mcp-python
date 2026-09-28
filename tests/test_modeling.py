@@ -271,3 +271,20 @@ def test_new_shape_resets_the_group(part):
                         end_x_mm=20, end_y_mm=11, end_z_mm=10, diameter_mm=4))
     out = parse(repeat_last_shape(copies=1, step_z_mm=-20))
     assert out["features"] == ["Hole4"] and out["group_size"] == 2
+
+
+def test_placement_accepts_end_caps_merged_with_a_flush_side():
+    """Log 2026-09-28 13:45: a rod's small-end boss (x -160..-140) flush with the rod's sides. Its end
+    caps merge with the rod's long side faces, so their boxes reach far down the rod."""
+    boss = m.cylinder_shape(-160, 157.5, 0, -140, 157.5, 0, 36, cut=False)
+    merged = [([-160, 139.5, -18], [-140, 175.5, 18]),          # the round face
+              ([-160, -43, -18], [-160, 175.5, 18]),            # cap merged with the rod's side
+              ([-140, -43, -18], [-140, 175.5, 18])]
+    assert m.placement_ok(boss, merged)
+    wrong_way = [([-180, 139.5, -18], [-160, 175.5, 18]),       # extruded the other way from the offset
+                 ([-180, 139.5, -18], [-180, 175.5, 18]),
+                 ([-160, -43, -18], [-160, 175.5, 18])]
+    assert not m.placement_ok(boss, wrong_way)
+    flipped = [([140, 139.5, -18], [160, 175.5, 18]), ([140, 139.5, -18], [140, 175.5, 18]),
+               ([160, 139.5, -18], [160, 175.5, 18])]
+    assert not m.placement_ok(boss, flipped)

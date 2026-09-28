@@ -111,3 +111,14 @@ def test_make_v4_engine_builds_connects_and_turns(app, tmp_path, monkeypatch):
 def test_make_engine_refuses_bad_numbers_before_building(app):
     out = parse(make_engine(project="Bad", layout="v", cylinders=3))
     assert out["error"] == Code.BAD_ARGUMENT and not app.created
+
+
+def test_retrying_make_engine_reuses_the_parts_already_built(app, monkeypatch):
+    first = parse(make_engine(project="Single", layout="inline", cylinders=1, heads=False))
+    assert first["ok"] and "reused_parts" not in first
+    made = len(app.created)
+    again = parse(make_engine(project="Single", layout="inline", cylinders=1, heads=False))
+    assert again["ok"] and sorted(again["reused_parts"]) == ["block", "crankshaft", "piston1", "rod1"]
+    assert len(app.created) == made + 1  # only a new assembly
+    other = parse(make_engine(project="Single", layout="inline", cylinders=1, heads=False, stroke=60))
+    assert other["ok"] and "reused_parts" not in other  # new numbers: everything is rebuilt

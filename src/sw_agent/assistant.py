@@ -315,6 +315,7 @@ class Assistant:
         getattr(self.router, "new_turn", lambda: None)()
         tools = self.toolbox.tools
         failed: dict[str, str] = {}  # identical calls that already failed in this request
+        same_error: dict[str, int] = {}  # tool + error (numbers ignored) -> how often it happened
         for _ in range(self.max_steps):
             self.on_event(Event("thinking", "thinking"))
             try:
@@ -347,11 +348,18 @@ class Assistant:
                     self.transcript.write("tool_call", name, arguments=json.dumps(args)[:TRANSCRIPT_CHARS])
                 self.on_event(Event("tool", name))
                 key = name + json.dumps(args, sort_keys=True)
+                stuck = [k for k, n in same_error.items() if k.startswith(name + "|") and n >= 2]
                 if key in failed:
                     output = json.dumps({"ok": False, "error": "REPEATED_CALL",
                                          "message": f"This exact call already failed: {failed[key]}",
                                          "fix": "Change what the error names, or use another approach. "
                                                 "Never send the same failing call twice."})
+                elif stuck:
+                    output = json.dumps({"ok": False, "error": "STOP_RETRYING",
+                                         "message": f"{name} already failed twice with the same error; "
+                                                    "changing the numbers did not help.",
+                                         "fix": "Stop. Tell the user what failed, in plain words, and ask how to "
+                                                "continue (or to send the logs from the Tools menu)."})
                 else:
                     output = await self.toolbox.call(name, args)
                     try:
@@ -360,6 +368,8 @@ class Assistant:
                         data = None
                     if isinstance(data, dict) and data.get("ok") is False:
                         failed[key] = str(data.get("message", ""))[:300]
+                        gist = name + "|" + re.sub(r"[-\d.]+", "#", str(data.get("message", "")))[:200]
+                        same_error[gist] = same_error.get(gist, 0) + 1
                 if self.transcript is not None:
                     self.transcript.write("tool_output", output[:TRANSCRIPT_CHARS], tool=name)
                 self.on_event(Event("result", summarize_result(output)))

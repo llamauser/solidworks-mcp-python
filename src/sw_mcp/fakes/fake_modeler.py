@@ -307,6 +307,19 @@ class FakeFeatureManager:
         doc.feature_count += 1
         feat = FakeFeature(doc, f"{'Cut' if cut else 'Boss'}-Extrude{doc.feature_count}", "ICE" if not cut else "Cut")
         feat.faces = [] if (doc.broken_bosses and not cut) else [FakeBoxFace(lo, hi)]
+        if feat.faces and not cut:
+            # Like SOLIDWORKS: an end cap flush with the side of an older feature merges with that
+            # face, so the cap's face reaches over the older feature too.
+            for along in (s, e):
+                clo, chi = list(lo), list(hi)
+                clo[n] = chi[n] = along
+                for old in doc.solids:
+                    olo, ohi = old.box
+                    if (abs(olo[n] - along) < 1e-6 or abs(ohi[n] - along) < 1e-6) and all(
+                            clo[i] < ohi[i] and chi[i] > olo[i] for i in (ia, ib)):
+                        clo = [min(clo[i], olo[i]) if i != n else along for i in range(3)]
+                        chi = [max(chi[i], ohi[i]) if i != n else along for i in range(3)]
+                feat.faces.append(FakeBoxFace(clo, chi))
         feat.box = (lo, hi)
         if sketch.circles:
             center = [0.0] * 3

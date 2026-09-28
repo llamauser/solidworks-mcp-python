@@ -13,6 +13,7 @@ as <assembly>.motion.json and move_mechanism animates it without relying on the 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass, field
@@ -272,16 +273,31 @@ def build(app: Any, project: str, eng: EngineDesign) -> dict:
     from .mechanism import connect_parts
 
     pr.split_name(f"{project}/block")  # reject a bad project name before building anything
+    folder = pr.part_path(f"{project}/block").parent
+    record = folder / ".engine_parts.json"  # plan fingerprints of parts already built
+    try:
+        done_before = json.loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        done_before = {}
     built: dict[str, Any] = {}
+    reused = []
     for name, steps in eng.parts.items():
+        fingerprint = hashlib.sha1(json.dumps(steps, sort_keys=True).encode()).hexdigest()
+        if done_before.get(name, {}).get("plan") == fingerprint and (folder / f"{name}.SLDPRT").exists():
+            built[name] = done_before[name].get("size_mm")
+            reused.append(name)
+            continue
         try:
             out = p.execute(app, None, p.Plan.model_validate(steps), save_as=f"{project}/{name}")
         except SwError as err:
             done = f" Parts already saved: {', '.join(built)}." if built else ""
             raise SwError(err.code, f"Building the {name} failed: {err.message}{done}",
-                          "Tell the user which part failed. Try other numbers (a larger bore, or another "
-                          "stroke), or report it to the developer with the logs.") from None
+                          "This is a problem in the engine builder, not in your numbers: do NOT call "
+                          "make_engine again with other numbers. Tell the user the engine could not be "
+                          "built and ask them to send the logs (Tools menu, option 3) to the developer.") from None
         built[name] = out.get("size_mm")
+        done_before[name] = {"plan": fingerprint, "size_mm": built[name]}
+        record.write_text(json.dumps(done_before, indent=1), encoding="utf-8")
     assembly = pr.make_assembly(app, project, ",".join(eng.parts), project)
     motion_file(assembly["assembly"]).write_text(json.dumps(eng.motion(), indent=1), encoding="utf-8")
     joints = connect_parts(try_call(app, "ActiveDoc"), fixed_part="block")
@@ -295,6 +311,8 @@ def build(app: Any, project: str, eng: EngineDesign) -> dict:
         "parts": built, "assembly": assembly["assembly"], "size_mm": assembly.get("size_mm"),
         "joints": len(joints.get("joints", [])), "moving_parts": joints.get("can_move", []),
     }
+    if reused:
+        out["reused_parts"] = reused  # identical parts from an earlier attempt were not rebuilt
     for key in ("warnings", "failed_joints", "warning"):
         if assembly.get(key) or joints.get(key):
             out.setdefault("warnings", []).append(assembly.get(key) or joints.get(key))

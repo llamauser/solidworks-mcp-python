@@ -370,3 +370,18 @@ def test_assistant_makes_and_turns_a_v4_in_three_requests(fake_solidworks, monke
     assert results[0].startswith("done: V4") and "13 joints" in results[0]
     assert "piston1-1 70" in results[1]
     assert max(len(json.dumps(r["messages"])) + len(json.dumps(r["tools"] or [])) for r in llm.requests) < 20000
+
+
+def test_same_error_twice_stops_the_retries(fake_solidworks):
+    """Log 2026-09-28 13:50: the model kept retrying make_engine with other numbers after the same error."""
+    llm = Scripted([tool_call("open_document", {"file_path": f"C:/parts/v{i}.SLDPRT"}, f"o{i}") for i in range(1, 4)]
+                   + [text("It keeps failing, please check the file.")])
+    router, _ = make_router(config_with(("groq", "g", None, 100)), {"groq": llm})
+
+    async def go():
+        async with Toolbox() as toolbox:
+            return await Assistant(router, toolbox).send("open my part")
+
+    assert "keeps failing" in run(go())
+    third = llm.requests[3]["messages"][-1]["content"]
+    assert "STOP_RETRYING" in third and "failed twice" in third

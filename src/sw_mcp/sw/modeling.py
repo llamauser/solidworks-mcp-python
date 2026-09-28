@@ -356,7 +356,15 @@ def placement_ok(shape: Shape, face_boxes_mm: list[tuple[list[float], list[float
         center = [(fmin[i] + fmax[i]) / 2 for i in range(3)]
         if all(lo[i] - tol <= center[i] <= hi[i] + tol for i in range(3)):
             inside += 1
-    return inside >= max(1, math.ceil(len(face_boxes_mm) / 2))
+    if inside >= max(1, math.ceil(len(face_boxes_mm) / 2)):
+        return True
+    # A flush end cap merges with the coplanar side of an older feature (a pin boss flush with a
+    # rod's sides), so its face is much bigger than the new shape. Still correct if every face at
+    # least reaches into the requested region and one sits inside it; a shape built the wrong way
+    # has a face (its far end) completely outside the region.
+    reaches = all(all(fmin[i] <= hi[i] + tol and fmax[i] >= lo[i] - tol for i in range(3))
+                  for fmin, fmax in face_boxes_mm)
+    return reaches and inside >= 1
 
 
 @dataclass
