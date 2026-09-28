@@ -1,6 +1,6 @@
 # Comparing free models
 
-Run these five prompts with each model, using the **solidworks** agent (the default in this folder).
+Run these prompts with each model, using the **solidworks** agent (the default in this folder).
 To switch models, edit the `model:` line in `.opencode/agents/solidworks.md`.
 Start each model from the same state: SolidWorks open, the smoke-test block (or any simple part)
 open, and nothing selected. Mark a prompt as a pass only if the model called the expected tools
@@ -33,3 +33,15 @@ Watch for these failure patterns:
 
 These are free OpenRouter models that supported tool calling on 2026-09-28. The list changes
 often, so check openrouter.ai/models (filter: free, tools) for the current one.
+
+## Build prompts (new part from a description)
+
+Start a new session for each prompt. Pass means the model wrote a plan, the final
+`get_model_summary` matches the request, and `bodies` is 1.
+
+| # | Prompt | Expected result |
+|---|--------|-----------------|
+| B1 | `Make a 100 x 60 x 12 mm base plate with rounded corners (R8) and four 8 mm mounting holes, 10 mm in from each side.` | Size 100 x 12 x 60. Four through holes at x ±40, z ±20. |
+| B2 | `Make an L-shaped bracket: base 80 x 40 x 6 mm, a vertical wall 50 mm tall and 6 mm thick on one long edge, and two 6.5 mm holes in the base.` | Size 80 x 50 x 40 (or 80 x 56 x 40 if the wall sits on top of the base). One body. |
+| B3 | `Make a round flange: 90 mm diameter, 10 mm thick, a 30 mm center bore, and 6 holes of 8 mm on a 70 mm bolt circle.` | Size 90 x 10 x 90. Seven holes. The bolt-circle centers are 35 mm from the center, 60 degrees apart. |
+| B4 | `A small electronics box: 70 x 40 x 25 mm outside, hollow with 2 mm walls and an open top, with 1 mm chamfers on the outside vertical edges.` | Outer box, then an inner pocket cut (x -33..33, y 2..25, z -18..18). Size 70 x 25 x 40. |

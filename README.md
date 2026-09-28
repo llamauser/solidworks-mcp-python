@@ -17,8 +17,9 @@ installs.
    ```
    This creates `.venv`, installs the server, writes `opencode.json` with the right Python
    path, and runs the unit tests.
-3. Run the end-to-end check. It starts SolidWorks if needed, builds a 40×20×10 mm test
-   block in a temp folder, and exercises every tool:
+3. Run the end-to-end check. It starts SolidWorks if needed, edits a 40×20×10 mm test block,
+   then builds a plate with fillets, holes, a pocket, a boss and an angled cut from scratch,
+   checking every step. Everything happens in a temp folder:
    ```powershell
    .venv\Scripts\python scripts\smoke_test.py
    ```
@@ -66,6 +67,29 @@ OpenCode shows each tool with the server name as a prefix, e.g. `solidworks_get_
 | `get_selection_context` | `max_items=5` | Describes what the user clicked: face (surface, normal, radius, area, owning feature and its dimensions), edge, dimension, mate, component or vertex. |
 | `set_dimension` | `dimension_name`, `new_value` | Changes a dimension (mm or degrees) and rebuilds. If the rebuild breaks, the old value is restored automatically. |
 | `save_document` | `save_as_path=""`, `overwrite=false` | Saves in place, or saves as / exports by extension (.step .stl .pdf .dxf .igs .x_t …). It refuses to overwrite a file unless told to. |
+| `new_part` | none | Creates an empty part from the default template. |
+| `make_box` | `mode` (add/cut), `x/y/z_min_mm`, `x/y/z_max_mm` | Adds or cuts a block between world coordinates: plates, ribs, pockets, slots. |
+| `make_cylinder` | `mode`, start and end centers (`start_x_mm` … `end_z_mm`), `diameter_mm` | Adds a boss or rod, or cuts a hole, along X, Y or Z. |
+| `make_prism` | `mode`, `axis`, `points_mm` ("a,b; a,b; …"), `start_mm`, `end_mm` | Adds or cuts any straight-sided outline (L, T, U, triangle) pushed along an axis. |
+| `finish_edges` | `kind` (fillet/chamfer), `size_mm`, `edges` (vertical/top/bottom/parallel_x/parallel_z/circular/all) | Rounds or bevels a group of edges. |
+| `undo_last_feature` | none | Deletes the most recent feature. |
+| `get_model_summary` | none | Size, min/max, volume, body count and feature list, to check a build against the request. |
+
+### How building works
+
+The model never draws sketches or picks sketch planes. It gives shapes in **world millimeters**
+(X right, Y up, Z toward the viewer), and each tool does the SolidWorks steps: select the default
+plane by its position in the tree, draw the profile, extrude or cut.
+
+**Every result is checked.** The tool reads back the faces SolidWorks actually created and checks
+that they sit where the shape was asked for. If SolidWorks built it in the wrong direction (or,
+with the fallback sketch mapping, mirrored), the attempt is deleted and rebuilt the other way
+automatically. Each result reports the part size, volume change and warnings (a separate body,
+a cut that removed nothing), so the model can verify every step. The server log records how
+many attempts each shape needed.
+
+The **solidworks** agent writes a numbered plan with every coordinate first, runs it one tool
+per step, and finishes with `get_model_summary` to compare against the request.
 
 Every answer is minified JSON, either `{"ok":true,...}` or
 `{"ok":false,"error":"CODE","message":"...","fix":"what to do next"}`.

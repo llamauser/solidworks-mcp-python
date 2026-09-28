@@ -142,7 +142,17 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - AGENTS.md was deleted; it would duplicate the agent prompt.
   - The server no longer sends MCP `instructions` by default (`SW_MCP_INSTRUCTIONS=0`).
   - Goal: few requests and tokens on OpenRouter's free limits.
-- [ ] Waiting on the user: test the solidworks agent via OpenRouter, then fill in the scorecard in docs/model-test-prompts.md.
+- [x] **Modeling tools added (the user wants description → plan → build → correct result):**
+  - **Tools:** `new_part`, `make_box` (min/max per axis), `make_cylinder` (two end centers + diameter), `make_prism` (axis + "a,b; a,b" outline + start/end), `finish_edges` (fillet/chamfer by filter: vertical/top/bottom/parallel_x/parallel_z/circular/all), `undo_last_feature`, `get_model_summary`. Each shape tool has `mode` add/cut.
+  - **Coordinates:** everything is in world mm (X right, Y up, Z toward viewer). The logic is in `src/sw_mcp/sw/modeling.py`, the wrappers in `tools/modeling.py`.
+  - **Build flow:** select the default plane by tree position (Front=Z, Top=Y, Right=X) → map world points to sketch coordinates with SolidWorks' `ModelToSketchTransform` via MathUtility (a fallback table is used if that fails) → draw → FeatureExtrusion3 / FeatureCut4 with a start offset.
+  - **Self-check:** each result is verified by `placement_ok()`: most of the new feature's face-box centers must lie in the requested region. A bad attempt is deleted (DeleteSelection2 absorbed) and retried with reversed direction or flipped offset (and, for the fallback table only, a mirrored axis). The log records the attempts.
+  - **Tool schemas:** pydantic `title` fields are stripped (`server._slim_schemas`). There are 12 tools in about 10 KB of schema, and MAX_PARAMS is now 8.
+  - **Agent:** it now plans (numbered plan with coordinates, worked example), `steps: 40`, and the order is base → added shapes → outer fillets → pockets/holes.
+  - **Tests:** a fake modeler (`tests/fakes/fake_modeler.py`) with knobs `reverse_convention` / `mirror_second_axis` proves the self-correction. 78 tests pass.
+  - **Smoke test:** `build_checks()` builds a plate with an R3 fillet, 4 holes, a pocket, a boss, a prism cut and an undo, and checks the volumes (expected about 20.9k mm³).
+- [ ] **Waiting on the user:** run the smoke test again (the build section is new and unverified on real SolidWorks), then try the build prompts B1–B4 in docs/model-test-prompts.md.
+- **Unverified on real SolidWorks:** MathUtility.CreatePoint with a VT_R8 array, FeatureCut4/FeatureExtrusion3 with a start offset, FeatureFillet3 with None arrays, IPartDoc methods (GetBodies2/GetPartBox) through late binding, IFeature.GetFaces, and IFace2.GetBox.
 
 ### Next batch after the smoke report
 `new_part`, `create_sketch(plane: front|top|right)` (by tree position), `sketch_rectangle`, `sketch_circle`, `extrude`, `cut`, `fillet_selected_edges`, `list_mates`. `build_block()` in the smoke test is a working starting point for the modelling calls.

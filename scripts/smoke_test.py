@@ -228,7 +228,52 @@ async def run(args) -> None:
         record("clear error: unknown dimension", "PASS" if bad.get("error") == "NOT_FOUND" else "FAIL", short(bad))
 
         try_call(app, "CloseDoc", try_call(doc, "GetTitle"))
+        await build_checks(client, work)
         record("temp folder", "INFO", work)
+
+
+async def build_checks(client: Client, work: str) -> None:
+    """Build a part from scratch with the modeling tools and check every result."""
+    async def step(label: str, name: str, check=None, **args) -> dict:
+        out = await tool(client, name, **args)
+        ok = out.get("ok") and (check is None or check(out))
+        record(f"build: {label}", "PASS" if ok else "FAIL", short(out, 400))
+        return out
+
+    created = await step("new_part", "new_part")
+    if not created.get("ok"):
+        return
+    await step("plate 60x40x10", "make_box",
+               lambda o: o.get("size_mm") == [60.0, 10.0, 40.0] and abs(o["volume_mm3"] - 24000) < 1,
+               mode="add", x_min_mm=-30, x_max_mm=30, y_min_mm=0, y_max_mm=10, z_min_mm=-20, z_max_mm=20)
+    await step("fillet 4 vertical corners R3", "finish_edges",
+               lambda o: o.get("edges") == 4 and -80 < o.get("volume_change_mm3", 0) < -75,
+               kind="fillet", size_mm=3, edges="vertical")
+    for x, z in ((22, 12), (-22, 12), (22, -12), (-22, -12)):
+        await step(f"hole d6 at x={x} z={z}", "make_cylinder",
+                   lambda o: abs(o.get("volume_change_mm3", 0) + 282.7) < 3,
+                   mode="cut", start_x_mm=x, start_y_mm=-1, start_z_mm=z, end_x_mm=x, end_y_mm=11,
+                   end_z_mm=z, diameter_mm=6)
+    await step("pocket 20x10, 4 deep", "make_box",
+               lambda o: abs(o.get("volume_change_mm3", 0) + 800) < 2,
+               mode="cut", x_min_mm=-10, x_max_mm=10, y_min_mm=6, y_max_mm=10, z_min_mm=-5, z_max_mm=5)
+    await step("boss d10 x 8 high at z=12", "make_cylinder",
+               lambda o: o.get("size_mm") == [60.0, 18.0, 40.0] and abs(o["volume_change_mm3"] - 628.3) < 3,
+               mode="add", start_x_mm=0, start_y_mm=10, start_z_mm=12, end_x_mm=0, end_y_mm=18,
+               end_z_mm=12, diameter_mm=10)
+    await step("angled prism cut on the +X end", "make_prism",
+               lambda o: -730 < o.get("volume_change_mm3", 0) < -690,
+               mode="cut", axis="z", points_mm="30,10; 30,4; 24,10", start_mm=-21, end_mm=21)
+    await step("extra box then undo", "make_box", None,
+               mode="add", x_min_mm=-5, x_max_mm=5, y_min_mm=18, y_max_mm=30, z_min_mm=10, z_max_mm=14)
+    await step("undo_last_feature", "undo_last_feature", lambda o: o.get("size_mm") == [60.0, 18.0, 40.0])
+    expected = 24000 - 77.3 - 4 * 282.74 - 800 + 628.3 - 720
+    await step(f"summary (expect volume about {expected:.0f} mm3, 1 body)", "get_model_summary",
+               lambda o: o.get("bodies") == 1 and abs(o.get("volume_mm3", 0) - expected) < 0.01 * expected
+               and {"Box1", "Fillet1", "Hole1", "Hole2", "Hole3", "Hole4", "Pocket1", "Cylinder1", "Cut-Prism1"}
+               <= {f.get("name") for f in o.get("features", [])})
+    path = os.path.join(work, "Built.SLDPRT")
+    await step("save the built part", "save_document", lambda o: os.path.isfile(path), save_as_path=path)
 
 
 def write_report() -> None:

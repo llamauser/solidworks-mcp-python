@@ -12,9 +12,9 @@ from mcp import Client
 from sw_mcp.server import create_server
 
 PRIMITIVES = {"string", "number", "integer", "boolean"}
-MAX_PARAMS = 5
+MAX_PARAMS = 8  # geometry needs up to 8 plain numbers (two 3D points + diameter); still flat
 MAX_DESCRIPTION_CHARS = 900  # per tool docstring
-MAX_TOTAL_SCHEMA_CHARS = 9000  # the whole tools/list payload the model must read each turn
+MAX_TOTAL_SCHEMA_CHARS = 11000  # the whole tools/list payload the model must read each turn
 
 
 async def _list_tools():
@@ -27,10 +27,19 @@ def tools():
     return asyncio.run(_list_tools())
 
 
-def test_first_five_tools_present(tools):
+def test_all_tools_present(tools):
     assert {t.name for t in tools} == {
         "get_status", "open_document", "get_selection_context", "set_dimension", "save_document",
+        "new_part", "make_box", "make_cylinder", "make_prism", "finish_edges", "undo_last_feature",
+        "get_model_summary",
     }
+
+
+def test_no_auto_titles(tools):
+    for t in tools:
+        assert "title" not in t.input_schema
+        for prop in t.input_schema.get("properties", {}).values():
+            assert "title" not in prop, t.name
 
 
 def test_names_are_plain_snake_case_without_prefix(tools):
