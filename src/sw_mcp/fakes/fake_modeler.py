@@ -215,7 +215,13 @@ class FakeFeatureManager:
         feat = FakeFeature(doc, f"{'Cut' if cut else 'Boss'}-Extrude{doc.feature_count}", "ICE" if not cut else "Cut")
         feat.faces = [FakeBoxFace(lo, hi)]
         feat.box = (lo, hi)
-        vol = area * (e - s) / 1e9
+        length = e - s
+        if cut:
+            # Like SolidWorks, a cut only removes material that is there: clip its length along
+            # the extrusion axis to the solid's extent (enough for through holes and pockets).
+            ulo, uhi = doc.union_box()
+            length = max(0.0, min(e, uhi[n]) - max(s, ulo[n]))
+        vol = area * length / 1e9
         feat.volume_m3 = -vol if cut else vol
         doc.volume_m3 += feat.volume_m3
         doc.features[doc.features.index(sk_feat)] = feat  # the sketch is absorbed

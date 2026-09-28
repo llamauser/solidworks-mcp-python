@@ -201,7 +201,12 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - `chat.py`: rich UI with /help /models /use /auto /new /tools /quit.
   - The fakes moved to `src/sw_mcp/fakes/` (the tests import from there), plus `make_modeling_app()`. `connection.use_app_factory(fn)` switches the server to a fake app.
   - 127 tests pass.
-- [ ] P4 next: `sw-agent bench`.
+- [x] **P4 done:** `sw-agent bench [--models N] [--yes]` (`src/sw_agent/bench.py`).
+  - Three tasks (plate with 4 holes, flange with bolt circle, L-bracket) run through the real assistant loop against `make_modeling_app()`. The checks are fake-part size / volume / cut count.
+  - The score (0-100, pass %) is saved into ModelEntry.score, so the router prefers high scores. A rate-limited model counts as skipped, not failed. It estimates the requests and asks to confirm first.
+  - The fake now clips cut length to the solid extent along the axis (like SolidWorks; matches the real -282.7 mm³ for a through hole).
+  - 130 tests pass.
+- [ ] P5 next: geometry (rotate steps via move/copy body + combine, revolve, build_part save_as into a project folder, make_assembly at origin, list_project, big-job guide).
 
 **Plan:**
 - **P1 Plan-as-data:** the LLM writes the whole part as one JSON plan (the existing primitives). The server validates it with pydantic and executes it deterministically with verification, with a repair loop on errors. This takes about 2–5 LLM requests per part instead of about 30, and makes weak or free models viable. It lives in sw_mcp, so all clients benefit.

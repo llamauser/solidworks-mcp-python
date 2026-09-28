@@ -116,7 +116,7 @@ def test_mirrored_sketch_axis_is_corrected(part):
     hole = part.FeatureByName("Hole1")
     lo, hi = hole.box
     assert math.isclose((lo[2] + hi[2]) / 2, -10) and math.isclose((lo[0] + hi[0]) / 2, 20)
-    assert math.isclose(out["volume_change_mm3"], -round(math.pi * 9 * 12, 1), abs_tol=0.2)
+    assert math.isclose(out["volume_change_mm3"], -round(math.pi * 9 * 10, 1), abs_tol=0.2)  # clipped to the plate
 
 
 def test_cut_outside_part_reports_clearly(part):

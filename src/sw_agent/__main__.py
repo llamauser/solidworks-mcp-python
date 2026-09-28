@@ -72,6 +72,34 @@ def cmd_sync(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bench(args: argparse.Namespace) -> int:
+    import asyncio
+
+    from .bench import TASKS, estimate_requests, run_bench
+    from .router import Router
+
+    console = Console()
+    cfg = UserConfig.load()
+    router = Router(cfg)
+    models = router.candidates()[: args.models]
+    if not models:
+        console.print("No working models. Run [bold]sw-agent setup[/bold] first.")
+        return 1
+    console.print(f"Scoring {len(models)} model(s) on {len(TASKS)} SolidWorks tasks (no SolidWorks needed).")
+    console.print(f"This uses about {estimate_requests(len(models))} requests from your free quotas.")
+    if not args.yes and not Confirm.ask("Start?", default=True, console=console):
+        return 0
+    scores = asyncio.run(run_bench(cfg, router, args.models, on_progress=console.print))
+    table = Table(title="Benchmark (the router now tries the best first)")
+    for col in ("Model", "Score", "Requests", "Note"):
+        table.add_column(col)
+    for s in scores:
+        req = sum(r.requests for r in s.results)
+        table.add_row(s.candidate.label, "-" if s.score is None else f"{s.score:.0f}", str(req), s.skipped)
+    console.print(table)
+    return 0
+
+
 def cmd_chat(_: argparse.Namespace) -> int:
     from .chat import main as chat_main
 
@@ -88,8 +116,13 @@ def main(argv: list[str] | None = None) -> int:
         ("connect", cmd_connect, "use the tools from other AI apps"),
         ("sync", cmd_sync, "regenerate per-app instruction files"),
         ("chat", cmd_chat, "start the assistant"),
+        ("bench", cmd_bench, "score connected models on SolidWorks tasks"),
     ):
-        sub.add_parser(name, help=text).set_defaults(func=fn)
+        p = sub.add_parser(name, help=text)
+        p.set_defaults(func=fn)
+        if name == "bench":
+            p.add_argument("--models", type=int, default=3, help="how many models to score (best first)")
+            p.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     args = parser.parse_args(argv)
     return (getattr(args, "func", None) or cmd_chat)(args)
 
