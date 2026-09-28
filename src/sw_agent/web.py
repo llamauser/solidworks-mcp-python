@@ -1,9 +1,11 @@
 """The browser version of the SolidWorks Assistant (`sw-agent web`).
 
 A small local web server (127.0.0.1 only) that serves one page and a JSON API. The page polls
-for events (thinking / tool / result / model / reply) so progress shows up while SolidWorks
-works. Every API call must carry the random token embedded in the page, so other websites
-open in the same browser cannot drive SolidWorks.
+for events (thinking / tool / result / model / reply / review) so progress shows up while
+SolidWorks works. In review mode the assistant waits before changing SolidWorks: the page shows
+the call (a plan as readable steps), and the user runs it, edits it, skips it with a note, or
+stops. Every API call must carry the random token embedded in the page, so other websites open
+in the same browser cannot drive SolidWorks.
 """
 
 from __future__ import annotations
@@ -22,9 +24,10 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
 
-from .assistant import LEAN_TOOLS, Assistant, Toolbox
+from .assistant import LEAN_TOOLS, REVIEW_TOOLS, Assistant, Decision, PendingCall, Toolbox
 from .config import UserConfig
 from .logs import Transcript, setup_logging
+from .review import edited_args, preview_call
 from .router import Router
 
 POLL_WAIT_S = 20.0
@@ -41,9 +44,14 @@ class WebSession:
     busy: bool = False
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     next_id: int = 1
+    pending: dict | None = None  # the call waiting for the user: {"payload", "future"}
+    next_review: int = 1
 
-    def push(self, kind: str, text: str) -> None:
-        self.events.append({"id": self.next_id, "kind": kind, "text": text})
+    def push(self, kind: str, text: str, data: dict | None = None) -> None:
+        event = {"id": self.next_id, "kind": kind, "text": text}
+        if data is not None:
+            event["data"] = data
+        self.events.append(event)
         self.next_id += 1
         del self.events[:-MAX_EVENTS]
         self.changed.set()
@@ -69,8 +77,21 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
     async def lifespan(app: Starlette):
         async with backend() as (router, toolbox):
             session = WebSession(assistant=None, router=router)  # type: ignore[arg-type]
-            session.assistant = Assistant(router, toolbox, on_event=lambda e: session.push(e.kind, e.text),
-                                          transcript=transcript_factory())
+
+            async def approve(call: PendingCall) -> Decision:
+                future: asyncio.Future = asyncio.get_running_loop().create_future()
+                payload = {"id": session.next_review, "name": call.name, "args": call.args, "model": call.model,
+                           "reason": call.reason, "preview": preview_call(call.name, call.args)}
+                session.next_review += 1
+                session.pending = {"payload": payload, "future": future}
+                session.push("review", f"Waiting for you: {call.name}", payload)
+                try:
+                    return await future
+                finally:
+                    session.pending = None
+
+            session.assistant = Assistant(router, toolbox, on_event=lambda e: session.push(e.kind, e.text, e.data),
+                                          transcript=transcript_factory(), approver=approve)
             state["s"] = session
             if not router.candidates():
                 session.push("error", "No AI model is connected yet. Close this window and run "
@@ -130,7 +151,35 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
             return denied()
         s = state["s"]
         models = [{"n": i, "provider": p, "model": m, "state": st} for i, (p, m, st) in enumerate(s.router.status(), 1)]
-        return JSONResponse({"models": models, "busy": s.busy, "pinned": bool(s.router.pinned)})
+        return JSONResponse({"models": models, "busy": s.busy, "pinned": bool(s.router.pinned),
+                             "review": s.assistant.review, "pending": s.pending["payload"] if s.pending else None})
+
+    async def context(request: Request) -> JSONResponse:
+        if not authorized(request):
+            return denied()
+        return JSONResponse(state["s"].assistant.context())
+
+    async def preview(request: Request) -> JSONResponse:
+        if not authorized(request):
+            return denied()
+        body = await request.json()
+        args = edited_args({}, body.get("args"))
+        return JSONResponse(preview_call(str(body.get("name", "")), args) or {"ok": True})
+
+    async def review(request: Request) -> JSONResponse:
+        if not authorized(request):
+            return denied()
+        s = state["s"]
+        body = await request.json()
+        pending = s.pending
+        if pending is None or body.get("id") != pending["payload"]["id"] or pending["future"].done():
+            return JSONResponse({"ok": False, "error": "nothing is waiting for you"}, status_code=409)
+        action = body.get("action")
+        if action not in ("run", "skip", "stop"):
+            return JSONResponse({"ok": False, "error": "unknown action"}, status_code=400)
+        args = edited_args(pending["payload"]["args"], body.get("args")) if action == "run" else None
+        pending["future"].set_result(Decision(action, args, str(body.get("note", ""))[:1000]))
+        return JSONResponse({"ok": True})
 
     async def control(request: Request) -> JSONResponse:
         if not authorized(request):
@@ -153,6 +202,21 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
         elif action == "auto":
             s.router.unpin()
             s.push("info", "Automatic model choice.")
+        elif action == "stop":
+            if not s.busy:
+                return JSONResponse({"ok": False, "error": "nothing is running"}, status_code=409)
+            s.assistant.request_stop()
+            if s.pending and not s.pending["future"].done():
+                s.pending["future"].set_result(Decision("stop"))
+            s.push("info", "Stopping after the current step...")
+        elif action == "review":
+            mode = body.get("mode")
+            if mode not in REVIEW_TOOLS:
+                return JSONResponse({"ok": False, "error": "unknown mode"}, status_code=400)
+            s.assistant.review = mode
+            s.push("info", {"off": "Review is off: I build without asking.",
+                            "builds": "Review is on: I show you each plan before building it.",
+                            "all": "Review everything: I ask before every change in SolidWorks."}[mode])
         else:
             return JSONResponse({"ok": False, "error": "unknown action"}, status_code=400)
         return JSONResponse({"ok": True})
@@ -164,6 +228,9 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
             Route("/api/events", events),
             Route("/api/status", status),
             Route("/api/control", control, methods=["POST"]),
+            Route("/api/context", context),
+            Route("/api/preview", preview, methods=["POST"]),
+            Route("/api/review", review, methods=["POST"]),
         ],
         lifespan=lifespan,
     )

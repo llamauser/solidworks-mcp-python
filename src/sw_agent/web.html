@@ -8,40 +8,48 @@
   :root {
     --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --line: #e3e6eb;
     --accent: #c8102e; --accent-soft: #fbe9ec; --user: #1d4ed8; --user-text: #ffffff;
-    --ok: #127a3e; --bad: #b42318; --warn: #a15c07; --code: #f1f3f6;
+    --ok: #127a3e; --bad: #b42318; --warn: #a15c07; --code: #f1f3f6; --wait: #fff7e6; --wait-line: #f0b429;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #12151b; --panel: #1a1f27; --text: #e7eaf0; --muted: #98a2b3; --line: #2b323d;
       --accent: #ff5a6e; --accent-soft: #3a1f25; --user: #3b6fe0; --user-text: #ffffff;
-      --ok: #4ade80; --bad: #f87171; --warn: #fbbf24; --code: #232a35;
+      --ok: #4ade80; --bad: #f87171; --warn: #fbbf24; --code: #232a35; --wait: #2a2416; --wait-line: #b7862b;
     }
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body { background: var(--bg); color: var(--text); font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
          display: flex; flex-direction: column; }
-  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--panel);
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: var(--panel);
            border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   header h1 { font-size: 17px; margin: 0; font-weight: 650; display: flex; align-items: center; gap: 8px; }
   header h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
   #model { color: var(--muted); font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
            white-space: nowrap; }
-  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  button, select { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
            border-radius: 8px; padding: 6px 12px; cursor: pointer; }
-  button:hover { border-color: var(--muted); }
+  button:hover, select:hover { border-color: var(--muted); }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.stop { border-color: var(--bad); color: var(--bad); display: none; }
+  button.stop.on { display: inline-block; }
   button:disabled { opacity: .5; cursor: default; }
+  label.review { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
   main { flex: 1; overflow-y: auto; padding: 20px 16px; }
-  #log { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  #log { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
   .bubble { padding: 10px 14px; border-radius: 12px; max-width: 85%; overflow-wrap: anywhere; }
   .user { align-self: flex-end; background: var(--user); color: var(--user-text); white-space: pre-wrap; }
   .reply { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
   .reply p { margin: 0 0 8px; } .reply p:last-child { margin-bottom: 0; }
   .reply ul, .reply ol { margin: 4px 0 8px; padding-left: 22px; }
-  .reply code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
-  .reply pre { background: var(--code); padding: 10px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
-  .step { align-self: flex-start; font-size: 13px; color: var(--muted); padding-left: 4px; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  pre { background: var(--code); padding: 10px; border-radius: 8px; overflow-x: auto; font-size: 12.5px;
+        margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .step { align-self: stretch; font-size: 13px; color: var(--muted); padding-left: 4px; }
+  .step summary { cursor: pointer; list-style: none; }
+  .step summary::-webkit-details-marker { display: none; }
+  .step summary::after { content: "  show"; color: var(--muted); opacity: .6; font-size: 12px; }
+  .step details[open] summary::after { content: "  hide"; }
   .step .ok { color: var(--ok); } .step .bad { color: var(--bad); }
   .note { align-self: center; font-size: 13px; color: var(--warn); }
   .info { align-self: center; font-size: 13px; color: var(--muted); }
@@ -51,24 +59,42 @@
   #thinking.on { display: block; }
   #thinking::after { content: ""; animation: dots 1.2s steps(4) infinite; }
   @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
-  #welcome { max-width: 860px; margin: 8vh auto 0; text-align: center; }
+  .card { align-self: stretch; background: var(--wait); border: 1px solid var(--wait-line); border-radius: 12px; padding: 12px 14px; }
+  .card h3 { margin: 0 0 4px; font-size: 15px; }
+  .card .why { color: var(--muted); font-size: 13px; margin: 0 0 8px; white-space: pre-wrap; }
+  .card table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--panel); border-radius: 8px; }
+  .card td, .card th { padding: 5px 8px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+  .card th { color: var(--muted); font-weight: 600; border-top: 0; }
+  .card .cut { color: var(--bad); } .card .add { color: var(--ok); }
+  .card textarea { width: 100%; min-height: 220px; font: 12.5px/1.45 Consolas, "Cascadia Mono", monospace; margin-top: 8px; }
+  .card .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+  .card .row input { flex: 1; min-width: 180px; font: inherit; padding: 6px 10px; border-radius: 8px;
+                     border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+  .card .problem { color: var(--bad); font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
+  .card.done { background: var(--panel); border-color: var(--line); opacity: .75; }
+  .card.done .row, .card.done textarea, .card.done .edit { display: none; }
+  #welcome { max-width: 900px; margin: 8vh auto 0; text-align: center; }
   #welcome h2 { font-size: 22px; margin: 0 0 6px; }
   #welcome p { color: var(--muted); margin: 0 0 18px; }
   .examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; text-align: left; }
   .examples button { text-align: left; padding: 12px 14px; line-height: 1.4; border-radius: 10px; }
   footer { background: var(--panel); border-top: 1px solid var(--line); padding: 12px 16px; }
-  form { max-width: 860px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
-  textarea { flex: 1; resize: none; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
-             border-radius: 10px; padding: 10px 12px; min-height: 44px; max-height: 180px; }
-  textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .hint { max-width: 860px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
-  #models { position: fixed; right: 16px; top: 58px; width: min(460px, calc(100vw - 32px)); background: var(--panel);
+  form { max-width: 900px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  textarea { flex: 1; resize: vertical; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+             border-radius: 10px; padding: 10px 12px; }
+  #input { resize: none; min-height: 44px; max-height: 180px; }
+  textarea:focus, button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { max-width: 900px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
+  .panel { position: fixed; right: 16px; top: 58px; width: min(460px, calc(100vw - 32px)); background: var(--panel);
             border: 1px solid var(--line); border-radius: 12px; padding: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.18);
-            display: none; z-index: 5; }
-  #models.open { display: block; }
+            display: none; z-index: 5; max-height: calc(100vh - 80px); overflow-y: auto; }
+  .panel.open { display: block; }
+  #context { width: min(760px, calc(100vw - 32px)); }
   #models table { width: 100%; border-collapse: collapse; font-size: 13px; }
   #models td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
   #models td:last-child { text-align: right; }
+  .msg { border-top: 1px solid var(--line); padding: 6px 0; font-size: 13px; }
+  .msg b { text-transform: uppercase; font-size: 11px; color: var(--muted); letter-spacing: .04em; }
   @media (max-width: 560px) { .bubble { max-width: 100%; } header { gap: 8px; } }
 </style>
 </head>
@@ -76,15 +102,31 @@
 <header>
   <h1><span class="dot" aria-hidden="true"></span>SolidWorks Assistant</h1>
   <div id="model" aria-live="polite">Starting...</div>
+  <label class="review" for="reviewSel">Review
+    <select id="reviewSel" title="Should I show you each plan before building it?">
+      <option value="off">Off: just build</option>
+      <option value="builds">Show plans before building</option>
+      <option value="all">Ask before every change</option>
+    </select>
+  </label>
+  <button id="stopBtn" class="stop" type="button">Stop</button>
+  <button id="contextBtn" type="button">Context</button>
   <button id="modelsBtn" type="button">Models</button>
   <button id="newBtn" type="button">New conversation</button>
 </header>
-<div id="models" role="dialog" aria-label="AI models">
+<div id="models" class="panel" role="dialog" aria-label="AI models">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
     <strong>AI models (tried top to bottom)</strong>
     <button type="button" id="autoBtn">Automatic</button>
   </div>
   <table id="modelsTable"></table>
+</div>
+<div id="context" class="panel" role="dialog" aria-label="What the AI sees">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <strong>What the AI receives with the next request</strong>
+    <button type="button" id="contextClose">Close</button>
+  </div>
+  <div id="contextBody"></div>
 </div>
 <main id="scroll">
   <div id="welcome">
@@ -93,7 +135,7 @@
     <div class="examples">
       <button type="button">Make a 100 x 60 x 12 mm base plate with rounded corners (R8) and four 8 mm holes 10 mm in from each side.</button>
       <button type="button">Make a round flange: 90 mm diameter, 10 mm thick, a 30 mm center bore and 6 holes of 8 mm on a 70 mm bolt circle.</button>
-      <button type="button">Make an L-bracket: base 80 x 40 x 6 mm, a 6 mm wall 50 mm tall on one long edge, two 6.5 mm holes in the base.</button>
+      <button type="button">Make a V4 engine, project "V4 engine 2", then turn the crankshaft and tell me how far each piston travels.</button>
       <button type="button">I clicked a face in SolidWorks. Make it 3 mm thicker.</button>
     </div>
   </div>
@@ -111,13 +153,16 @@
 const TOKEN = "__TOKEN__";
 const $ = (id) => document.getElementById(id);
 const log = $("log"), input = $("input"), sendBtn = $("sendBtn"), scroller = $("scroll");
-let lastId = 0, busy = false, thinking = null;
+let lastId = 0, busy = false, thinking = null, pendingId = null;
 
 const TOOL_LABELS = {
   build_part: "Building the part", get_status: "Checking SolidWorks", open_document: "Opening the file",
   save_document: "Saving", make_assembly: "Putting the assembly together", list_project: "Looking at the project",
   get_selection_context: "Reading what you selected", set_dimension: "Changing a dimension",
   get_model_summary: "Checking the result", undo_last_feature: "Undoing the last step",
+  make_engine: "Building the engine (a few minutes)", connect_parts: "Connecting the parts",
+  move_mechanism: "Turning the mechanism", make_motion_study: "Making the motion study",
+  manage_documents: "Managing the windows",
 };
 
 async function api(path, body) {
@@ -128,7 +173,7 @@ async function api(path, body) {
 }
 
 function esc(s) {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 function markdown(src) {
@@ -151,6 +196,18 @@ function markdown(src) {
   return out.join("").replace(/\u0000(\d+)\u0000/g, (_, i) => blocks[+i]);
 }
 
+function pretty(value) {
+  if (typeof value === "string") { try { return JSON.stringify(JSON.parse(value), null, 2); } catch (e) { return value; } }
+  return JSON.stringify(value, null, 2);
+}
+
+function argsForEditing(args) {
+  // A build_part plan arrives as a JSON string; show it as a readable object.
+  const copy = Object.assign({}, args);
+  if (typeof copy.plan === "string") { try { copy.plan = JSON.parse(copy.plan); } catch (e) { /* keep text */ } }
+  return JSON.stringify(copy, null, 2);
+}
+
 function add(cls, html) {
   $("welcome").style.display = "none";
   const el = document.createElement("div");
@@ -165,27 +222,121 @@ function setThinking(on) {
   if (!on && thinking) { thinking.remove(); thinking = null; }
 }
 
+function previewHtml(p) {
+  if (!p) return "";
+  if (p.ok === false) {
+    return `<div class="problem">&#10007; ${esc(p.message || "")}${p.fix ? "\n" + esc(p.fix) : ""}</div>`;
+  }
+  if (p.steps) {
+    const rows = p.steps.map((s) => `<tr><td>${s.n}</td><td class="${s.mode === "cut" ? "cut" : "add"}">` +
+      `${esc(s.mode || "")}</td><td>${esc(s.what)}</td></tr>`).join("");
+    const size = p.expect_size ? `<div class="why">Expected size: ${p.expect_size.join(" x ")} mm</div>` : "";
+    return `<table><tr><th>#</th><th></th><th>Step</th></tr>${rows}</table>${size}`;
+  }
+  if (p.parts) {
+    return `<table>
+      <tr><th>Engine</th><td>${esc(p.layout)} ${p.cylinders} cylinders${p.bank_angle ? ", " + p.bank_angle + " degree V" : ""}</td></tr>
+      <tr><th>Bore x stroke</th><td>${p.bore_mm} x ${p.stroke_mm} mm, rod ${p.rod_length_mm} mm, ${p.displacement_cc} cc</td></tr>
+      <tr><th>Size</th><td>block ${p.block_length_mm} mm long, deck ${p.deck_height_mm} mm above the crankshaft</td></tr>
+      <tr><th>Parts</th><td>${p.parts.map(esc).join(", ")}</td></tr></table>`;
+  }
+  return "";
+}
+
+function renderReview(e) {
+  const d = e.data || {};
+  const card = add("card", `
+    <h3>&#9208; Waiting for you: ${esc(TOOL_LABELS[d.name] || d.name)}</h3>
+    ${d.reason ? `<p class="why">${esc(d.reason)}</p>` : ""}
+    <div class="prev">${previewHtml(d.preview)}</div>
+    <details class="edit"><summary>Edit the ${d.name === "build_part" ? "plan" : "settings"}</summary>
+      <textarea spellcheck="false">${esc(argsForEditing(d.args || {}))}</textarea>
+      <div class="row"><button type="button" class="check">Check</button>
+        <span class="why">Checks your changes without touching SolidWorks.</span></div>
+    </details>
+    <div class="row">
+      <button type="button" class="primary run">Run</button>
+      <input type="text" class="note" placeholder="Or tell the AI what to change instead...">
+      <button type="button" class="skip">Send note / skip</button>
+      <button type="button" class="stopit">Stop</button>
+    </div>`);
+  card.dataset.id = d.id;
+  const area = card.querySelector("textarea");
+  const edited = () => {
+    try { return JSON.parse(area.value); } catch (err) { return undefined; }
+  };
+  const decide = async (action) => {
+    const body = { id: d.id, action };
+    if (action === "run") {
+      const args = edited();
+      if (args === undefined) { card.querySelector(".prev").innerHTML = previewHtml({ ok: false, message: "The edited text is not valid JSON." }); return; }
+      body.args = args;
+    }
+    if (action === "skip") body.note = card.querySelector(".note").value;
+    const { status, data } = await api("/api/review", body);
+    if (status === 200) closeCard(card, action === "run" ? "run" : action === "skip" ? "skipped" : "stopped");
+    else add("error", esc(data.error || "Could not send that."));
+  };
+  card.querySelector(".run").addEventListener("click", () => decide("run"));
+  card.querySelector(".skip").addEventListener("click", () => decide("skip"));
+  card.querySelector(".stopit").addEventListener("click", () => decide("stop"));
+  card.querySelector(".note").addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); decide("skip"); } });
+  card.querySelector(".check").addEventListener("click", async () => {
+    const args = edited();
+    const prev = card.querySelector(".prev");
+    if (args === undefined) { prev.innerHTML = previewHtml({ ok: false, message: "The edited text is not valid JSON." }); return; }
+    const { data } = await api("/api/preview", { name: d.name, args });
+    prev.innerHTML = previewHtml(data) || '<div class="why">&#10003; Looks valid.</div>';
+  });
+  setThinking(false);
+}
+
+function closeCard(card, how) {
+  if (card.classList.contains("done")) return;
+  card.classList.add("done");
+  const h = card.querySelector("h3");
+  if (h) h.innerHTML = h.innerHTML.replace("Waiting for you:", how ? `${how}:` : "");
+}
+
+function closeAllCards() { log.querySelectorAll(".card:not(.done)").forEach((c) => closeCard(c, "")); }
+
+function stepHtml(icon, label, detail) {
+  if (!detail) return `${icon} ${label}`;
+  return `<details><summary>${icon} ${label}</summary><pre>${esc(detail)}</pre></details>`;
+}
+
 function render(e) {
   switch (e.kind) {
     case "user": add("bubble user", esc(e.text)); break;
     case "thinking": setThinking(true); break;
-    case "tool": setThinking(false); add("step", "&#8594; " + esc(TOOL_LABELS[e.text] || e.text) + "..."); break;
+    case "review": renderReview(e); break;
+    case "tool": {
+      closeAllCards(); setThinking(false);
+      const args = e.data && e.data.args;
+      const detail = args && Object.keys(args).length ? argsForEditing(args) : "";
+      add("step", stepHtml("&#8594;", esc(TOOL_LABELS[e.text] || e.text) + "...", detail));
+      break;
+    }
     case "result": {
+      closeAllCards();
       const bad = e.text.startsWith("problem");
-      add("step", `<span class="${bad ? "bad" : "ok"}">${bad ? "&#10007;" : "&#10003;"}</span> ${esc(e.text.replace(/^(done: |problem: )/, ""))}`);
+      const out = e.data && e.data.output ? pretty(e.data.output) : "";
+      add("step", stepHtml(`<span class="${bad ? "bad" : "ok"}">${bad ? "&#10007;" : "&#10003;"}</span>`,
+        esc(e.text.replace(/^(done: |problem: )/, "")), out));
       break;
     }
     case "model": add("note", esc(e.text)); break;
     case "error": setThinking(false); add("error", esc(e.text)); break;
-    case "reply": setThinking(false); add("bubble reply", markdown(e.text)); break;
+    case "reply": closeAllCards(); setThinking(false); add("bubble reply", markdown(e.text)); break;
     case "info": add("info", esc(e.text)); break;
-    case "idle": setThinking(false); setBusy(false); refreshStatus(); break;
+    case "idle": closeAllCards(); setThinking(false); setBusy(false); refreshStatus(); break;
   }
 }
 
 function setBusy(b) {
   busy = b; sendBtn.disabled = b; $("newBtn").disabled = b;
   sendBtn.textContent = b ? "Working..." : "Send";
+  $("stopBtn").classList.toggle("on", b);
 }
 
 async function poll() {
@@ -193,7 +344,7 @@ async function poll() {
     try {
       const { data } = await api(`/api/events?after=${lastId}`);
       for (const e of data.events || []) { lastId = Math.max(lastId, e.id); render(e); }
-      if (typeof data.busy === "boolean" && !data.busy && busy) setBusy(false);
+      if (typeof data.busy === "boolean") { if (!data.busy && busy) setBusy(false); if (data.busy && !busy) setBusy(true); }
     } catch (err) {
       add("error", "Lost the connection to the assistant. Is its window still open?");
       await new Promise((r) => setTimeout(r, 5000));
@@ -210,6 +361,34 @@ async function refreshStatus() {
     `<tr><td>${m.n}</td><td>${esc(m.provider)}<br><small>${esc(m.model)}</small></td><td>${esc(m.state)}</td>` +
     `<td><button type="button" data-n="${m.n}">Use first</button></td></tr>`).join("") ||
     "<tr><td>No models yet. Run the installer or 'sw-agent setup'.</td></tr>";
+  if (data.review) $("reviewSel").value = data.review;
+  return data;
+}
+
+function messageHtml(m) {
+  let body = "";
+  if (m.content) body += `<pre>${esc(m.content)}</pre>`;
+  for (const c of m.tool_calls || []) {
+    body += `<pre>call ${esc(c.function.name)} ${esc(pretty(c.function.arguments))}</pre>`;
+  }
+  const who = m.role === "tool" ? "tool result" : m.role;
+  return `<div class="msg"><b>${esc(who)}</b>${body}</div>`;
+}
+
+async function showContext() {
+  const { data } = await api("/api/context");
+  const msgs = data.messages || [];
+  const system = msgs.length && msgs[0].role === "system" ? msgs[0] : null;
+  const rest = system ? msgs.slice(1) : msgs;
+  $("contextBody").innerHTML = `
+    <div class="why">About ${data.estimated_tokens} tokens per request (tool definitions ${data.tool_definitions_chars} characters)
+      ${data.model ? "&middot; last model: " + esc(data.model) : ""}. Older steps are shortened to save your free quota.</div>
+    <details><summary>Instructions (system prompt)</summary>${system ? `<pre>${esc(system.content)}</pre>` : ""}</details>
+    <details><summary>Tools offered (${(data.tools || []).length})</summary><pre>${esc((data.tools || []).join(", "))}</pre></details>
+    <h4 style="margin:10px 0 4px">Conversation as the AI sees it (${rest.length} messages)</h4>
+    ${rest.map(messageHtml).join("") || '<div class="why">Nothing yet.</div>'}`;
+  $("context").classList.add("open");
+  $("models").classList.remove("open");
 }
 
 async function send(text) {
@@ -221,22 +400,41 @@ async function send(text) {
   if (status !== 200) { setBusy(false); add("error", status === 409 ? "Still working on the last request." : "Could not send that."); }
 }
 
+function savedReview() { try { return localStorage.getItem("review") || ""; } catch (e) { return ""; } }
+
 $("form").addEventListener("submit", (ev) => { ev.preventDefault(); send(input.value); });
 input.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); send(input.value); } });
 input.addEventListener("input", () => { input.style.height = ""; input.style.height = Math.min(input.scrollHeight, 180) + "px"; });
 document.querySelectorAll(".examples button").forEach((b) => b.addEventListener("click", () => send(b.textContent)));
 $("newBtn").addEventListener("click", () => api("/api/control", { action: "new" }));
-$("modelsBtn").addEventListener("click", () => { $("models").classList.toggle("open"); refreshStatus(); });
+$("stopBtn").addEventListener("click", () => api("/api/control", { action: "stop" }));
+$("reviewSel").addEventListener("change", async () => {
+  const mode = $("reviewSel").value;
+  try { localStorage.setItem("review", mode); } catch (e) { /* private window */ }
+  await api("/api/control", { action: "review", mode });
+});
+$("contextBtn").addEventListener("click", showContext);
+$("contextClose").addEventListener("click", () => $("context").classList.remove("open"));
+$("modelsBtn").addEventListener("click", () => { $("models").classList.toggle("open"); $("context").classList.remove("open"); refreshStatus(); });
 $("autoBtn").addEventListener("click", async () => { await api("/api/control", { action: "auto" }); refreshStatus(); });
 $("modelsTable").addEventListener("click", async (ev) => {
   const n = ev.target.dataset && ev.target.dataset.n;
   if (n) { await api("/api/control", { action: "use", n: +n }); refreshStatus(); }
 });
-document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") $("models").classList.remove("open"); });
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") { $("models").classList.remove("open"); $("context").classList.remove("open"); }
+});
 
-refreshStatus();
-poll();
-input.focus();
+(async () => {
+  const status = await refreshStatus();
+  const wanted = savedReview();
+  if (wanted && status.review !== wanted && !status.busy) {
+    await api("/api/control", { action: "review", mode: wanted });
+    $("reviewSel").value = wanted;
+  }
+  poll();
+  input.focus();
+})();
 </script>
 </body>
 </html>

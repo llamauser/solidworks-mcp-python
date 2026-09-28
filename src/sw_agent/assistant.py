@@ -18,7 +18,7 @@ import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from importlib import resources
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from .router import NoModelAvailable, Router
 
@@ -245,20 +245,52 @@ def summarize_result(text: str) -> str:
 # ------------------------------------------------------------ the loop
 @dataclass
 class Event:
-    kind: str  # thinking | tool | result | model | error | reply
+    kind: str  # thinking | tool | result | model | error | reply | review | info
     text: str
+    data: dict | None = None  # tool: {"args"}; result: {"output"}; review: the pending call
+
+
+# Tools that change SolidWorks. In review mode "builds" only the big ones wait for the user.
+REVIEW_TOOLS = {
+    "off": frozenset(),
+    "builds": frozenset({"build_part", "make_engine", "make_assembly"}),
+    "all": frozenset({"build_part", "make_engine", "make_assembly", "connect_parts", "move_mechanism",
+                      "make_motion_study", "set_dimension", "save_document", "manage_documents",
+                      "new_part", "make_box", "make_cylinder", "make_prism", "repeat_last_shape",
+                      "repeat_last_shape_around", "finish_edges", "undo_last_feature"}),
+}
+
+
+@dataclass
+class PendingCall:
+    """A tool call waiting for the user (review mode)."""
+    name: str
+    args: dict
+    model: str = ""
+    reason: str = ""  # the model's own words that came with the call, if any
+
+
+@dataclass
+class Decision:
+    action: str  # run | skip | stop
+    args: dict | None = None  # run: the (possibly edited) arguments
+    note: str = ""  # skip: what the user wants instead
+
+
+Approver = Callable[[PendingCall], Awaitable[Decision]]
 
 
 class Assistant:
     def __init__(self, router: Router, toolbox: Toolbox, on_event: Callable[[Event], None] | None = None,
-                 max_steps: int = MAX_STEPS, transcript: Any = None) -> None:
+                 max_steps: int = MAX_STEPS, transcript: Any = None, approver: Approver | None = None,
+                 review: str = "off") -> None:
         self.router = router
         self.toolbox = toolbox
         self.transcript = transcript
         show = on_event or (lambda e: None)
 
         def emit(event: Event) -> None:
-            if self.transcript is not None and event.kind != "thinking":
+            if self.transcript is not None and event.kind not in ("thinking", "review"):
                 self.transcript.write(event.kind, event.text)
             show(event)
 
@@ -266,12 +298,34 @@ class Assistant:
         self.max_steps = max_steps
         self.system = system_prompt()
         self.history: list[dict] = []
+        self.approver = approver
+        self.review = review if review in REVIEW_TOOLS else "off"
+        self._stop = False
         router.on_event = lambda msg: self.on_event(Event("model", msg))
 
     def reset(self) -> None:
         self.history.clear()
         if self.transcript is not None:
             self.transcript.write("info", "new conversation")
+
+    def request_stop(self) -> None:
+        """Stop after the step that is running now (a SolidWorks operation is never cut off halfway)."""
+        self._stop = True
+
+    def context(self) -> dict:
+        """What the next request to the model would contain, for the user to look at."""
+        window = self._window()
+        tools = self.toolbox.tools if self.toolbox is not None else []
+        chars = len(json.dumps(window)) + len(json.dumps(tools))
+        last = getattr(self.router, "last_used", None)
+        return {
+            "model": last.label if last is not None else "",
+            "estimated_tokens": int(chars / 3.4),
+            "tools": [t["function"]["name"] for t in tools],
+            "tool_definitions_chars": len(json.dumps(tools)),
+            "messages": window,
+            "review": self.review,
+        }
 
     def _window(self) -> list[dict]:
         """System prompt + a compact history. Earlier requests become (user text, a short note of
@@ -308,6 +362,7 @@ class Assistant:
         return out
 
     async def send(self, text: str) -> str:
+        self._stop = False
         self.history.append({"role": "user", "content": text})
         if self.transcript is not None:
             self.transcript.write("user", text)
@@ -317,6 +372,8 @@ class Assistant:
         failed: dict[str, str] = {}  # identical calls that already failed in this request
         same_error: dict[str, int] = {}  # tool + error (numbers ignored) -> how often it happened
         for _ in range(self.max_steps):
+            if self._stop:
+                return self._stopped()
             self.on_event(Event("thinking", "thinking"))
             try:
                 result, cand = await asyncio.to_thread(self.router.chat, self._window(), tools)
@@ -324,6 +381,8 @@ class Assistant:
                 log.warning("no model available: %s", exc)
                 self.on_event(Event("error", str(exc)))
                 return str(exc)
+            if self._stop:  # the user pressed stop while the model was thinking
+                return self._stopped()
             if self.transcript is not None:
                 self.transcript.write("model_answer", result.content[:TRANSCRIPT_CHARS], model=cand.label,
                                       latency_ms=result.latency_ms, usage=result.usage,
@@ -341,14 +400,34 @@ class Assistant:
                                        c["function"].get("arguments"), str)
                                    else json.dumps(c["function"].get("arguments") or {})}} for c in calls]
             self.history.append({"role": "assistant", "content": result.content or None, "tool_calls": calls})
-            for call in calls:
+            for n, call in enumerate(calls):
                 name = call["function"]["name"]
                 args = parse_args(call["function"]["arguments"])
+                if self._stop:
+                    self._answer_rest(calls[n:])
+                    return self._stopped()
+                if self.approver is not None and name in REVIEW_TOOLS[self.review]:
+                    decision = await self.approver(PendingCall(name, args, cand.label, (result.content or "")[:600]))
+                    if decision.action == "stop":
+                        self._answer_rest(calls[n:])
+                        return self._stopped()
+                    if decision.action == "skip":
+                        output = json.dumps({"ok": False, "error": "USER_SKIPPED",
+                                             "message": "The user looked at this call and did not run it."
+                                                        + (f' Their note: "{decision.note}"' if decision.note else ""),
+                                             "fix": "Do what the note says. If there is no note, ask the user what to change."})
+                        self.on_event(Event("result", "skipped by you" + (f": {decision.note}" if decision.note else "")))
+                        self.history.append({"role": "tool", "tool_call_id": call["id"], "content": output})
+                        continue
+                    if decision.args is not None and decision.args != args:
+                        args = decision.args
+                        call["function"]["arguments"] = json.dumps(args)  # the model sees what really ran
+                        self.on_event(Event("info", "Running your edited version."))
                 if self.transcript is not None:
                     self.transcript.write("tool_call", name, arguments=json.dumps(args)[:TRANSCRIPT_CHARS])
-                self.on_event(Event("tool", name))
+                self.on_event(Event("tool", name, {"args": args}))
                 key = name + json.dumps(args, sort_keys=True)
-                stuck = [k for k, n in same_error.items() if k.startswith(name + "|") and n >= 2]
+                stuck = [k for k, c in same_error.items() if k.startswith(name + "|") and c >= 2]
                 if key in failed:
                     output = json.dumps({"ok": False, "error": "REPEATED_CALL",
                                          "message": f"This exact call already failed: {failed[key]}",
@@ -372,11 +451,24 @@ class Assistant:
                         same_error[gist] = same_error.get(gist, 0) + 1
                 if self.transcript is not None:
                     self.transcript.write("tool_output", output[:TRANSCRIPT_CHARS], tool=name)
-                self.on_event(Event("result", summarize_result(output)))
+                self.on_event(Event("result", summarize_result(output), {"output": output[:20000]}))
                 self.history.append({"role": "tool", "tool_call_id": call["id"],
                                      "content": output[:TOOL_RESULT_CHARS]})
         reply = (f"I paused after {self.max_steps} steps without finishing. Say \"continue\" and I will "
                  "carry on from here.")
+        self.history.append({"role": "assistant", "content": reply})
+        self.on_event(Event("reply", reply))
+        return reply
+
+    def _answer_rest(self, calls: list[dict]) -> None:
+        """Every tool call needs an answer in the history, even the ones the user stopped."""
+        for call in calls:
+            self.history.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(
+                {"ok": False, "error": "USER_STOPPED", "message": "The user stopped before this ran."})})
+
+    def _stopped(self) -> str:
+        self._stop = False
+        reply = "Stopped. Tell me what to change, or say \"continue\"."
         self.history.append({"role": "assistant", "content": reply})
         self.on_event(Event("reply", reply))
         return reply

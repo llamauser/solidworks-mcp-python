@@ -319,3 +319,21 @@ def build(app: Any, project: str, eng: EngineDesign) -> dict:
     out["next"] = ("Tell the user the engine is ready. To see it run: move_mechanism(part=\"crankshaft\") "
                    "turns it (each piston travels one stroke), or make_motion_study for a SolidWorks study.")
     return out
+
+
+def preview(args: dict) -> dict:
+    """What make_engine would build with these arguments, without SolidWorks."""
+    keys = ("layout", "cylinders", "bank_angle", "bore", "stroke")
+    try:
+        eng = design(**{k: args[k] for k in keys if k in args}, heads=bool(args.get("heads", True)))
+    except SwError as err:
+        return err.to_dict()
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": "BAD_ARGUMENT", "message": str(exc)}
+    n = len(eng.cylinders)
+    return {"ok": True, "parts": list(eng.parts), "cylinders": n, "layout": eng.layout,
+            "bank_angle": eng.bank_angle if eng.layout == "v" else None,
+            "bore_mm": eng.bore, "stroke_mm": eng.stroke, "rod_length_mm": eng.rod_length,
+            "displacement_cc": round(math.pi / 4 * eng.bore ** 2 * eng.stroke * n / 1000, 1),
+            "block_length_mm": round(eng.dims["x_back"] - eng.dims["x_front"], 1),
+            "deck_height_mm": round(eng.dims["deck"], 1)}

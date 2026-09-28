@@ -101,3 +101,45 @@ def test_model_controls(client):
     assert client.get("/api/status", headers=H).json()["models"][0]["model"] == "m1"
     assert client.post("/api/control", json={"action": "use", "n": 9}, headers=H).status_code == 400
     assert client.post("/api/control", json={"action": "new"}, headers=H).json()["ok"]
+
+
+def wait_for(client, kind, after=0, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for e in client.get(f"/api/events?after={after}&wait=0", headers=H).json()["events"]:
+            if e["kind"] == kind:
+                return e
+        time.sleep(0.05)
+    raise AssertionError(f"no {kind} event")
+
+
+def test_review_mode_shows_the_plan_and_runs_the_edited_version(client):
+    assert client.post("/api/control", json={"action": "review", "mode": "builds"}, headers=H).json()["ok"]
+    assert client.post("/api/send", json={"text": "plate"}, headers=H).json()["ok"]
+    review = wait_for(client, "review")
+    data = review["data"]
+    assert data["name"] == "build_part" and data["preview"]["steps"][0]["what"].startswith("box x -20..20")
+    assert client.get("/api/status", headers=H).json()["pending"]["id"] == data["id"]
+    edited = {"plan": {"steps": [{"op": "box", "x": [-25, 25], "y": [0, 5], "z": [-10, 10]}]}}
+    check = client.post("/api/preview", json={"name": "build_part", "args": edited}, headers=H).json()
+    assert check["ok"] and "x -25..25" in check["steps"][0]["what"]
+    bad = client.post("/api/preview", json={"name": "build_part", "args": {"plan": {"steps": []}}}, headers=H).json()
+    assert bad["ok"] is False
+    assert client.post("/api/review", json={"id": data["id"], "action": "run", "args": edited}, headers=H).json()["ok"]
+    events = events_until_idle(client)
+    result = next(e for e in events if e["kind"] == "result")
+    assert "50 x 5 x 20" in result["text"]  # the edited 50 mm plate was built
+    assert client.post("/api/review", json={"id": data["id"], "action": "run"}, headers=H).status_code == 409
+    ctx = client.get("/api/context", headers=H).json()
+    assert ctx["review"] == "builds" and ctx["messages"][0]["role"] == "system"
+
+
+def test_stop_while_waiting_for_review(client):
+    client.post("/api/control", json={"action": "review", "mode": "builds"}, headers=H)
+    client.post("/api/send", json={"text": "plate"}, headers=H)
+    wait_for(client, "review")
+    assert client.post("/api/control", json={"action": "stop"}, headers=H).json()["ok"]
+    events = events_until_idle(client)
+    assert any(e["kind"] == "reply" and e["text"].startswith("Stopped") for e in events)
+    assert not client.fake.created
+    assert client.post("/api/control", json={"action": "stop"}, headers=H).status_code == 409  # nothing running

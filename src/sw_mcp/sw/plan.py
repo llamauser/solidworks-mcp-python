@@ -354,3 +354,50 @@ def execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "", keep_open:
     else:
         out["next"] = "Tell the user what was built. Save with save_document if they want to keep it."
     return out
+
+
+# ---------------------------------------------------------------- preview for people
+def _n(v: float) -> str:
+    return f"{v:g}"
+
+
+def _pt(p) -> str:
+    return "(" + ", ".join(_n(v) for v in p) + ")"
+
+
+def describe_step(step: Any) -> str:
+    rot = getattr(step, "rotate", None)
+    tilt = f", tilted {_n(rot.deg)} deg about {rot.axis.upper()} at {_pt(rot.about)}" if rot else ""
+    if isinstance(step, BoxStep):
+        return (f"box x {_n(step.x[0])}..{_n(step.x[1])}, y {_n(step.y[0])}..{_n(step.y[1])}, "
+                f"z {_n(step.z[0])}..{_n(step.z[1])}{tilt}")
+    if isinstance(step, CylinderStep):
+        return f"cylinder d{_n(step.diameter)} from {_pt(step.start)} to {_pt(step.end)}{tilt}"
+    if isinstance(step, PrismStep):
+        return (f"prism along {step.axis.upper()} {_n(step.start)}..{_n(step.end)}, "
+                f"{len(step.points)} corners {' '.join(_pt(p) for p in step.points[:6])}{tilt}")
+    if isinstance(step, RevolveStep):
+        return (f"revolve {_n(step.angle)} deg about {step.axis.upper()} through {_pt(step.center)}, "
+                f"profile {' '.join(_pt(p) for p in step.profile[:6])}")
+    if isinstance(step, EdgeStep):
+        return f"{step.op} {_n(step.size)} mm on the {step.edges} edges"
+    if isinstance(step, RepeatStep):
+        return f"repeat {step.copies} more, each moved by {_pt(step.step)}"
+    if isinstance(step, RepeatAroundStep):
+        return f"repeat {step.copies} more around {_pt(step.center)}, every {_n(step.angle_step)} deg"
+    return step.op
+
+
+def preview(text: str) -> dict:
+    """Check a plan without SolidWorks and describe every step in plain words."""
+    try:
+        plan = parse_plan(text)
+        check_plan(plan)
+    except SwError as err:
+        return err.to_dict()
+    steps = [{"n": i, "op": s.op, "mode": getattr(s, "mode", ""), "what": describe_step(s)}
+             for i, s in enumerate(plan.steps, 1)]
+    out: dict[str, Any] = {"ok": True, "steps": steps}
+    if plan.expect and plan.expect.size:
+        out["expect_size"] = list(plan.expect.size)
+    return out
