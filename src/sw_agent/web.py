@@ -154,6 +154,40 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
         return JSONResponse({"models": models, "busy": s.busy, "pinned": bool(s.router.pinned),
                              "review": s.assistant.review, "pending": s.pending["payload"] if s.pending else None})
 
+    async def providers(request: Request) -> JSONResponse:
+        """Providers the user can pick a model from (a key is stored, or it runs on this PC)."""
+        if not authorized(request):
+            return denied()
+        s = state["s"]
+        rows = [{"id": p.id, "name": p.name, "paid": p.paid} for p in s.router.providers.values()
+                if s.router.has_key(p.id)]
+        manual = dict(s.router.config.manual or {})
+        return JSONResponse({"providers": rows, "manual": manual,
+                             "openai_tools": s.router.config.openai_tools or {}})
+
+    async def models(request: Request) -> JSONResponse:
+        """The models a provider offers right now (asked live), best-suited first."""
+        if not authorized(request):
+            return denied()
+        s = state["s"]
+        pid = request.query_params.get("provider", "")
+        provider = s.router.providers.get(pid)
+        if provider is None or not s.router.has_key(pid):
+            return JSONResponse({"ok": False, "error": "unknown provider or no key"}, status_code=400)
+
+        def ask() -> list[str]:
+            from .probe import rank_models
+
+            return rank_models(provider, s.router.client_for(provider).list_models())
+
+        try:
+            listed = await asyncio.to_thread(ask)
+        except Exception as exc:  # noqa: BLE001 - show the reason instead of failing the page
+            return JSONResponse({"ok": False, "error": f"Could not list the models: {exc}"})
+        tested = {m.id for m in (s.router.config.providers.get(pid).models if pid in s.router.config.providers else [])
+                  if m.tools_ok}
+        return JSONResponse({"ok": True, "models": listed[:300], "tested": sorted(tested)})
+
     async def context(request: Request) -> JSONResponse:
         if not authorized(request):
             return denied()
@@ -200,8 +234,25 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
             s.router.pin(cands[n - 1].provider.id, cands[n - 1].model)
             s.push("info", f"Using {cands[n - 1].label} first.")
         elif action == "auto":
-            s.router.unpin()
+            s.router.unpin(remember=True)
             s.push("info", "Automatic model choice.")
+        elif action == "pick":
+            pid, model = str(body.get("provider", "")), str(body.get("model", "")).strip()
+            if not model or pid not in s.router.providers or not s.router.has_key(pid):
+                return JSONResponse({"ok": False, "error": "choose a connected provider and a model"}, status_code=400)
+            only = bool(body.get("only"))
+            s.router.pin(pid, model, only=only, remember=True)
+            s.push("info", f"Using {s.router.providers[pid].name} / {model}"
+                           + (" only (no switching)." if only else " first."))
+        elif action == "openai_tools":
+            tools = {"internet": bool(body.get("internet")), "terminal": bool(body.get("terminal"))}
+            s.router.config.openai_tools = tools
+            try:
+                s.router.config.save()
+            except OSError:
+                pass
+            s.push("info", "OpenAI models: internet " + ("ON" if tools["internet"] else "off") + ", terminal commands "
+                   + ("ON (each command waits for your OK)" if tools["terminal"] else "off") + ".")
         elif action == "stop":
             if not s.busy:
                 return JSONResponse({"ok": False, "error": "nothing is running"}, status_code=409)
@@ -229,6 +280,8 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
             Route("/api/status", status),
             Route("/api/control", control, methods=["POST"]),
             Route("/api/context", context),
+            Route("/api/providers", providers),
+            Route("/api/models", models),
             Route("/api/preview", preview, methods=["POST"]),
             Route("/api/review", review, methods=["POST"]),
         ],

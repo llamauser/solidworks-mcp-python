@@ -80,7 +80,26 @@ If the result is not right, just say what to change: "the holes should be 8 mm, 
 
 - **New conversation:** start fresh. It also uses less of your free quota.
 - **Models:** see which AI models are connected. Choose one to try first, or go back to
-  automatic.
+  automatic. Under **Choose a model yourself** pick a provider and any model it offers (the list
+  comes live from the provider, or type a name such as `gpt-5-mini`). Tick **Only this model** to
+  never switch to another one. The choice is kept for next time.
+- **OpenAI extras** (in the Models panel, only when OpenAI is connected; only OpenAI models get
+  them):
+  - **Internet:** the model can search the web (OpenAI's own search) and read pages, e.g. to look
+    up standard bolt or bearing sizes.
+  - **Terminal commands:** the model can run PowerShell commands on this PC, e.g. to zip a project
+    folder. **Every command is shown to you first** and runs only when you press Run.
+- **Review:** "Show plans before building" makes the assistant stop before each part or engine:
+  you see the plan as steps, can edit it (Check tests your edit without SolidWorks), run it,
+  send a note instead ("make the holes 8 mm"), or stop. "Ask before every change" stops before
+  anything that changes SolidWorks.
+- **Stop:** stops after the current step (a SolidWorks operation is never cut off halfway).
+- **Context:** shows exactly what the AI receives: its instructions, the tools, and the
+  conversation (older steps are shortened to save your free quota).
+- Every step line can be opened to see what exactly was sent to SolidWorks and what came back.
+
+In the terminal version the same things are commands: `/use openai gpt-5-mini` (add `only`),
+`/models openai`, `/internet on`, `/terminal on`, `/review builds`, `/context`.
 
 ## The Tools menu
 

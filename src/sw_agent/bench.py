@@ -112,9 +112,9 @@ class _CountingRouter(Router):
     def candidates(self, role: str = "main") -> list[Candidate]:
         return [self._only] if self._only.provider.id not in self._disabled else []
 
-    def chat(self, messages, tools=None, role="main", max_tokens=None):
+    def chat(self, messages, tools=None, role="main", max_tokens=None, tools_for=None):
         self.requests += 1
-        return super().chat(messages, tools, role, max_tokens)
+        return super().chat(messages, tools, role, max_tokens)  # scoring never offers the OpenAI extras
 
 
 async def score_model(base: Router, cand: Candidate, tasks: list[Task] = TASKS, max_steps: int = 6,

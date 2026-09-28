@@ -38,6 +38,11 @@ class ProviderEntry:
 @dataclass
 class UserConfig:
     providers: dict[str, ProviderEntry] = field(default_factory=dict)
+    # A model the user picked by hand: {"provider": "openai", "model": "gpt-5-mini", "only": false}.
+    # "only" = never switch to another model.
+    manual: dict = field(default_factory=dict)
+    # Extra abilities for OpenAI models only: {"internet": bool, "terminal": bool}.
+    openai_tools: dict = field(default_factory=dict)
 
     # ------------------------------------------------------------ persistence
     @classmethod
@@ -51,12 +56,20 @@ class UserConfig:
         for pid, entry in (raw.get("providers") or {}).items():
             models = [ModelEntry(**m) for m in entry.get("models", []) if isinstance(m, dict) and m.get("id")]
             cfg.providers[pid] = ProviderEntry(bool(entry.get("enabled", True)), entry.get("checked", ""), models)
+        manual = raw.get("manual") or {}
+        if isinstance(manual, dict) and manual.get("provider") and manual.get("model"):
+            cfg.manual = {"provider": str(manual["provider"]), "model": str(manual["model"]),
+                          "only": bool(manual.get("only", False))}
+        tools = raw.get("openai_tools") or {}
+        if isinstance(tools, dict):
+            cfg.openai_tools = {"internet": bool(tools.get("internet")), "terminal": bool(tools.get("terminal"))}
         return cfg
 
     def save(self, path: Path | None = None) -> Path:
         path = path or config_dir() / "config.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"version": 1, "providers": {pid: asdict(e) for pid, e in self.providers.items()}}
+        data = {"version": 1, "providers": {pid: asdict(e) for pid, e in self.providers.items()},
+                "manual": self.manual, "openai_tools": self.openai_tools}
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(path)

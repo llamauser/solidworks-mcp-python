@@ -26,7 +26,11 @@ HELP = """[bold]Just type what you want[/bold], for example:
 
 Commands:
   /models        which AI models are connected and ready
+  /models openai list every model a provider offers right now
   /use N         always try model number N first     /auto   go back to automatic choice
+  /use openai gpt-5-mini        pick any provider and model yourself (add "only" = never switch)
+  /internet on|off              OpenAI models may search the web and read pages
+  /terminal on|off              OpenAI models may run PowerShell commands (each one waits for your OK)
   /new           start a new conversation (saves requests on long sessions)
   /review builds show each plan before building it (run, edit, skip or stop)
   /review all    ask before every change        /review off   just build
@@ -143,6 +147,14 @@ def show_context(console: Console, assistant: Assistant) -> None:
         console.print(f"[bold]{who}:[/bold] {text[:600]}", markup=True, highlight=False)
 
 
+def _find_provider(router: Router, name: str):
+    name = name.strip().lower()
+    for provider in router.providers.values():
+        if name in (provider.id, provider.name.lower()) and router.has_key(provider.id):
+            return provider
+    return None
+
+
 def models_table(router: Router) -> Table:
     table = Table(title="Connected models (tried top to bottom)")
     table.add_column("#")
@@ -196,6 +208,41 @@ async def _loop(console: Console, router: Router, assistant: Assistant) -> str:
                 console.print(HELP)
             elif cmd == "models":
                 console.print(models_table(router))
+            elif cmd == "models" and arg:
+                provider = _find_provider(router, arg)
+                if provider is None:
+                    console.print("No connected provider with that name. Type /models.")
+                    continue
+                try:
+                    from .probe import rank_models
+
+                    listed = await asyncio.to_thread(lambda: rank_models(
+                        provider, router.client_for(provider).list_models()))
+                except Exception as exc:  # noqa: BLE001
+                    console.print(f"[red]Could not list the models: {exc}[/red]")
+                    continue
+                console.print(", ".join(listed[:200]) or "No chat models listed.")
+                console.print(f"[dim]Pick one with: /use {provider.id} <model>   (add 'only' to never switch)[/dim]")
+            elif cmd == "use" and arg and not arg.isdigit():
+                parts = arg.split()
+                provider = _find_provider(router, parts[0])
+                if provider is None or len(parts) < 2:
+                    console.print("Use it like this: /use openai gpt-5-mini   (or /use openai gpt-5-mini only)")
+                    continue
+                only = len(parts) > 2 and parts[2].lower() == "only"
+                router.pin(provider.id, parts[1], only=only, remember=True)
+                console.print(f"Using {provider.name} / {parts[1]}" + (" only." if only else " first."))
+            elif cmd in ("internet", "terminal") and arg in ("on", "off"):
+                on = arg == "on"
+                if cmd == "terminal" and on:
+                    answer = await asyncio.to_thread(console.input, "Allow OpenAI models to run PowerShell commands "
+                                                     "on this PC? Each command is shown to you first. [y/N] ")
+                    on = answer.strip().lower() in ("y", "yes")
+                tools = dict(router.config.openai_tools or {})
+                tools[cmd] = on
+                router.config.openai_tools = tools
+                router.config.save()
+                console.print(f"OpenAI models: {cmd} {'ON' if on else 'off'}.")
             elif cmd == "use" and arg.isdigit():
                 cands = router.candidates()
                 n = int(arg)
@@ -205,7 +252,7 @@ async def _loop(console: Console, router: Router, assistant: Assistant) -> str:
                 else:
                     console.print("No model with that number. Type /models.")
             elif cmd == "auto":
-                router.unpin()
+                router.unpin(remember=True)
                 console.print("Automatic model choice.")
             elif cmd == "new":
                 assistant.reset()

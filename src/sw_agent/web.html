@@ -93,6 +93,12 @@
   #models table { width: 100%; border-collapse: collapse; font-size: 13px; }
   #models td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
   #models td:last-child { text-align: right; }
+  .pick { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; font-size: 13px; }
+  .pick .line { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; align-items: center; }
+  .pick input[type=text], .pick input:not([type]) , #pickModel { flex: 1; min-width: 160px; font: inherit; padding: 6px 10px;
+         border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .pick label.check { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0; }
+  #openaiBox { border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 8px; }
   .msg { border-top: 1px solid var(--line); padding: 6px 0; font-size: 13px; }
   .msg b { text-transform: uppercase; font-size: 11px; color: var(--muted); letter-spacing: .04em; }
   @media (max-width: 560px) { .bubble { max-width: 100%; } header { gap: 8px; } }
@@ -120,6 +126,23 @@
     <button type="button" id="autoBtn">Automatic</button>
   </div>
   <table id="modelsTable"></table>
+  <div class="pick">
+    <strong>Choose a model yourself</strong>
+    <div class="why">Any model the provider offers, even one the setup did not test.</div>
+    <div class="line">
+      <select id="pickProvider" aria-label="Provider"></select>
+      <input id="pickModel" list="pickList" placeholder="model name, e.g. gpt-5-mini" aria-label="Model" autocomplete="off">
+      <datalist id="pickList"></datalist>
+    </div>
+    <label class="check"><input type="checkbox" id="pickOnly"> Only this model (never switch to another)</label>
+    <div class="line"><button type="button" class="primary" id="pickBtn">Use this model</button>
+      <span id="pickNote" class="why"></span></div>
+    <div id="openaiBox" hidden>
+      <strong>OpenAI extras</strong> <span class="why">(only OpenAI models get these)</span>
+      <label class="check"><input type="checkbox" id="oaInternet"> Internet: search the web and read pages</label>
+      <label class="check"><input type="checkbox" id="oaTerminal"> Terminal commands: PowerShell on this PC, each command waits for your OK</label>
+    </div>
+  </div>
 </div>
 <div id="context" class="panel" role="dialog" aria-label="What the AI sees">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -163,6 +186,7 @@ const TOOL_LABELS = {
   make_engine: "Building the engine (a few minutes)", connect_parts: "Connecting the parts",
   move_mechanism: "Turning the mechanism", make_motion_study: "Making the motion study",
   manage_documents: "Managing the windows",
+  web_search: "Searching the internet", fetch_page: "Reading a web page", run_command: "Running a command on this PC",
 };
 
 async function api(path, body) {
@@ -232,6 +256,10 @@ function previewHtml(p) {
       `${esc(s.mode || "")}</td><td>${esc(s.what)}</td></tr>`).join("");
     const size = p.expect_size ? `<div class="why">Expected size: ${p.expect_size.join(" x ")} mm</div>` : "";
     return `<table><tr><th>#</th><th></th><th>Step</th></tr>${rows}</table>${size}`;
+  }
+  if (p.command !== undefined) {
+    return `<pre>${esc(p.command)}</pre><div class="why">Runs in ${esc(p.runs_in || "")}</div>` +
+      `<div class="problem">${esc(p.warning || "")}</div>`;
   }
   if (p.parts) {
     return `<table>
@@ -355,7 +383,7 @@ async function poll() {
 async function refreshStatus() {
   const { data } = await api("/api/status");
   const models = data.models || [];
-  const ready = models.find((m) => m.state === "pinned" || m.state === "ready");
+  const ready = models.find((m) => ["only this one", "chosen", "ready"].includes(m.state));
   $("model").textContent = ready ? `Model: ${ready.provider} / ${ready.model}` : (models.length ? "All models are busy right now" : "No AI model connected");
   $("modelsTable").innerHTML = models.map((m) =>
     `<tr><td>${m.n}</td><td>${esc(m.provider)}<br><small>${esc(m.model)}</small></td><td>${esc(m.state)}</td>` +
@@ -373,6 +401,51 @@ function messageHtml(m) {
   }
   const who = m.role === "tool" ? "tool result" : m.role;
   return `<div class="msg"><b>${esc(who)}</b>${body}</div>`;
+}
+
+async function loadProviders() {
+  const { data } = await api("/api/providers");
+  const list = data.providers || [];
+  const manual = data.manual || {};
+  $("pickProvider").innerHTML = list.map((p) =>
+    `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("") || "<option value=''>No provider connected</option>";
+  if (manual.provider) $("pickProvider").value = manual.provider;
+  $("pickModel").value = manual.model || "";
+  $("pickOnly").checked = !!manual.only;
+  const tools = data.openai_tools || {};
+  $("openaiBox").hidden = !list.some((p) => p.id === "openai");
+  $("oaInternet").checked = !!tools.internet;
+  $("oaTerminal").checked = !!tools.terminal;
+  loadModels();
+}
+
+async function loadModels() {
+  const pid = $("pickProvider").value;
+  $("pickList").innerHTML = "";
+  if (!pid) return;
+  $("pickNote").textContent = "Asking the provider for its models...";
+  const { data } = await api(`/api/models?provider=${encodeURIComponent(pid)}`);
+  if (!data.ok) { $("pickNote").textContent = data.error || "Could not list the models."; return; }
+  const tested = new Set(data.tested || []);
+  $("pickList").innerHTML = data.models.map((m) =>
+    `<option value="${esc(m)}">${tested.has(m) ? "tested, works with tools" : ""}</option>`).join("");
+  $("pickNote").textContent = `${data.models.length} models. Type or pick one.`;
+}
+
+async function pickModel() {
+  const body = { action: "pick", provider: $("pickProvider").value, model: $("pickModel").value.trim(),
+                 only: $("pickOnly").checked };
+  const { status, data } = await api("/api/control", body);
+  $("pickNote").textContent = status === 200 ? "Saved. It is used from the next message on." : (data.error || "Could not use that.");
+  refreshStatus();
+}
+
+async function saveOpenaiTools() {
+  if ($("oaTerminal").checked && !confirm("Allow OpenAI models to run PowerShell commands on this PC? " +
+      "Every command is shown to you first and only runs if you press Run.")) {
+    $("oaTerminal").checked = false;
+  }
+  await api("/api/control", { action: "openai_tools", internet: $("oaInternet").checked, terminal: $("oaTerminal").checked });
 }
 
 async function showContext() {
@@ -415,7 +488,14 @@ $("reviewSel").addEventListener("change", async () => {
 });
 $("contextBtn").addEventListener("click", showContext);
 $("contextClose").addEventListener("click", () => $("context").classList.remove("open"));
-$("modelsBtn").addEventListener("click", () => { $("models").classList.toggle("open"); $("context").classList.remove("open"); refreshStatus(); });
+$("modelsBtn").addEventListener("click", () => {
+  $("models").classList.toggle("open"); $("context").classList.remove("open"); refreshStatus();
+  if ($("models").classList.contains("open")) loadProviders();
+});
+$("pickProvider").addEventListener("change", () => { $("pickModel").value = ""; loadModels(); });
+$("pickBtn").addEventListener("click", pickModel);
+$("oaInternet").addEventListener("change", saveOpenaiTools);
+$("oaTerminal").addEventListener("change", saveOpenaiTools);
 $("autoBtn").addEventListener("click", async () => { await api("/api/control", { action: "auto" }); refreshStatus(); });
 $("modelsTable").addEventListener("click", async (ev) => {
   const n = ev.target.dataset && ev.target.dataset.n;

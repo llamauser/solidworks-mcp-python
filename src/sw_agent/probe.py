@@ -63,7 +63,7 @@ def rank_models(provider: Provider, models: list[dict]) -> list[str]:
         low = mid.lower()
         if provider.model_filter and provider.model_filter not in mid:
             continue
-        if any(bad in low for bad in NOT_CHAT):
+        if any(bad in low for bad in NOT_CHAT) or any(bad in low for bad in provider.model_exclude):
             continue
         params = m.get("supported_parameters")
         if isinstance(params, list) and "tools" not in params:

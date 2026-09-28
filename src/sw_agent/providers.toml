@@ -96,6 +96,21 @@ privacy_note = "Requests are served by partner providers with their own policies
 model_prefs = ["qwen3", "llama-3.3-70b", "deepseek", "gpt-oss"]
 
 [[provider]]
+id = "openai"
+name = "OpenAI (paid)"
+base_url = "https://api.openai.com/v1"
+key_url = "https://platform.openai.com/api-keys"
+offer = "PAID, pay per use: the GPT models. Add a payment method and some credit on your OpenAI account first. With the mini models a design session usually costs a few cents; your usage page shows the exact cost. Used after the free providers unless you choose it under Models. Can also search the internet and run terminal commands (both off until you turn them on)."
+requires = "An OpenAI platform account with billing set up."
+privacy = "no-training"
+privacy_note = "OpenAI says data sent through its API is not used to train its models by default; it may keep it for up to 30 days for abuse monitoring."
+model_prefs = ["gpt-5-mini", "gpt-5", "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o", "o4-mini"]
+model_exclude = ["realtime", "audio", "search", "transcribe", "tts", "dall-e", "image", "embedding", "moderation", "davinci", "babbage", "instruct", "codex", "-pro", "deep-research", "computer-use", "sora", "-20"]
+paid = true
+max_tokens_param = "max_completion_tokens"
+reasoning_models = ["gpt-5", "gpt-6", "o1", "o3", "o4"]
+
+[[provider]]
 id = "lmstudio"
 name = "LM Studio (models on this PC)"
 base_url = "http://127.0.0.1:1234/v1"

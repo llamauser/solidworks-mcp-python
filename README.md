@@ -38,8 +38,9 @@ links the tools to OpenCode, VS Code Copilot, Gemini CLI, Claude Desktop and oth
 ## Connecting AI models (the wizard)
 
 `sw-agent setup` walks through AI providers one by one: OpenRouter, Google Gemini, Groq,
-Mistral, NVIDIA, Cerebras and Hugging Face, plus LM Studio and Ollama for models running on
-your own PC. For each one it:
+Mistral, NVIDIA, Cerebras and Hugging Face (free tiers), OpenAI (paid, pay per use), plus LM
+Studio and Ollama for models running on your own PC. `sw-agent setup openai` sets up just one
+provider. For each one it:
 1. says what you get for free and **what happens to your data**. Some free tiers may train on
    your prompts; the wizard says so clearly, and you decide.
 2. opens the page where you sign in and create a key;

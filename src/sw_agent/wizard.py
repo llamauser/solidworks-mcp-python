@@ -47,11 +47,23 @@ class Wizard:
         self.config = config if config is not None else UserConfig.load()
 
     # ------------------------------------------------------------ main flow
-    def run(self) -> UserConfig:
+    def run(self, only: str = "") -> UserConfig:
+        """Offer every provider, or just the one named (e.g. "openai")."""
         c = self.console
+        if only:
+            chosen = [p for p in self.providers if only.lower() in (p.id, p.name.lower())]
+            if not chosen:
+                c.print(f"[red]No provider called '{only}'.[/red] Choose from: "
+                        + ", ".join(p.id for p in self.providers))
+                return self.config
+            for provider in chosen:
+                self._offer(provider)
+            self.config.save()
+            self.summary()
+            return self.config
         c.print(Panel.fit(
             "[bold]Connect AI models to the SolidWorks Assistant[/bold]\n\n"
-            "Each provider below gives some free usage. For each one you want:\n"
+            "Most providers below give some free usage (OpenAI is paid). For each one you want:\n"
             "  1. a web page opens where you sign in and create a key,\n"
             "  2. you copy the key and paste it here (it stays hidden),\n"
             "  3. the key is tested and saved in Windows Credential Manager (not in a file).\n\n"
@@ -78,6 +90,9 @@ class Wizard:
             f"{p.offer}\n[dim]Needs:[/dim] {p.requires}\n"
             f"[dim]Your data:[/dim] [{style}]{p.privacy_label}[/{style}]. {p.privacy_note}{status}",
             title=f"[bold]{p.name}[/bold]", border_style=style))
+        if p.paid:
+            c.print("[yellow]Paid: this provider charges per use. It is used after the free ones unless "
+                    "you choose it under Models (/use in the terminal).[/yellow]")
         if p.privacy == "may-train":
             c.print("[red]Only use this provider for designs you are allowed to share.[/red]")
         if existing and existing.models:

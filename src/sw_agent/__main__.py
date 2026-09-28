@@ -27,12 +27,12 @@ from .registry import load_providers
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def cmd_setup(_: argparse.Namespace) -> int:
+def cmd_setup(args: argparse.Namespace) -> int:
     from .logs import setup_logging
     from .wizard import Wizard
 
     setup_logging()
-    Wizard().run()
+    Wizard().run(only=getattr(args, "provider", "") or "")
     return 0
 
 
@@ -174,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
     ):
         p = sub.add_parser(name, help=text)
         p.set_defaults(func=fn)
+        if name == "setup":
+            p.add_argument("provider", nargs="?", default="", help='set up only this provider, e.g. "openai"')
         if name in ("logs", "check"):
             p.add_argument("--no-open", action="store_true", help="do not open File Explorer")
         if name == "check":

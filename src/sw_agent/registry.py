@@ -27,6 +27,10 @@ class Provider:
     model_prefs: tuple[str, ...] = field(default_factory=tuple)
     model_filter: str = ""
     local: bool = False
+    paid: bool = False                               # costs money per use: tried after the free ones
+    model_exclude: tuple[str, ...] = field(default_factory=tuple)  # ids containing these are not chat models
+    max_tokens_param: str = "max_tokens"             # OpenAI's newer models want max_completion_tokens
+    reasoning_models: tuple[str, ...] = field(default_factory=tuple)  # id prefixes: no temperature, more tokens
 
     @property
     def privacy_label(self) -> str:
@@ -40,7 +44,8 @@ def load_providers(text: str | None = None) -> list[Provider]:
     out = []
     for raw in data.get("provider", []):
         raw = dict(raw)
-        raw["model_prefs"] = tuple(raw.get("model_prefs", ()))
+        for key in ("model_prefs", "model_exclude", "reasoning_models"):
+            raw[key] = tuple(raw.get(key, ()))
         raw["base_url"] = raw["base_url"].rstrip("/")
         out.append(Provider(**raw))
     ids = [p.id for p in out]

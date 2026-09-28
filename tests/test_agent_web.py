@@ -143,3 +143,23 @@ def test_stop_while_waiting_for_review(client):
     assert any(e["kind"] == "reply" and e["text"].startswith("Stopped") for e in events)
     assert not client.fake.created
     assert client.post("/api/control", json={"action": "stop"}, headers=H).status_code == 409  # nothing running
+
+
+def test_pick_any_model_and_switch_openai_extras(client, monkeypatch):
+    from sw_agent.config import UserConfig
+
+    listed = client.get("/api/providers", headers=H).json()
+    assert {"groq", "openai"} <= {p["id"] for p in listed["providers"]}  # every provider with a key
+    monkeypatch.setattr(Scripted, "list_models", lambda self: [{"id": "gpt-5.6-terra"}, {"id": "whisper-1"}], raising=False)
+    models = client.get("/api/models?provider=openai", headers=H).json()
+    assert models["ok"] and models["models"] == ["gpt-5.6-terra"]
+    r = client.post("/api/control", json={"action": "pick", "provider": "openai", "model": "gpt-5.6-terra",
+                                          "only": True}, headers=H)
+    assert r.json()["ok"]
+    status = client.get("/api/status", headers=H).json()
+    assert status["models"][0]["model"] == "gpt-5.6-terra" and status["models"][0]["state"] == "only this one"
+    assert client.post("/api/control", json={"action": "pick", "provider": "nope", "model": "x"}, headers=H).status_code == 400
+    client.post("/api/control", json={"action": "openai_tools", "internet": True, "terminal": False}, headers=H)
+    saved = UserConfig.load()
+    assert saved.manual["model"] == "gpt-5.6-terra" and saved.openai_tools == {"internet": True, "terminal": False}
+    assert client.get("/api/providers", headers=H).json()["openai_tools"]["internet"] is True

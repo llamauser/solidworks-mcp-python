@@ -16,6 +16,11 @@ def preview_call(name: str, args: dict) -> dict | None:
         from sw_mcp.sw import engine
 
         return engine.preview(args)
+    if name == "run_command":
+        from .extras import working_folder
+
+        return {"ok": True, "command": str(args.get("command", "")), "runs_in": working_folder(),
+                "warning": "This runs on your PC. Only run it if you understand it and asked for it."}
     return None
 
 

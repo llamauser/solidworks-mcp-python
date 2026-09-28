@@ -5,7 +5,10 @@ sticks to the model that answered last (switching back and forth costs rate limi
 A rate-limited provider is paused for the time it asks (or a growing back-off); a broken model
 is paused for a while; a refused key disables that provider for the session. Free tiers cap the
 tokens per minute (Groq: 7000-8000), so the cap a provider names is remembered and requests
-larger than it go to another model. The user can pin one model.
+larger than it go to another model. Paid providers come after the free ones.
+
+The user can pick any provider and model by hand (even one the setup never tested, e.g. a new
+OpenAI model): it is tried first, or used alone with "only" (no switching to other models).
 """
 
 from __future__ import annotations
@@ -70,6 +73,11 @@ class Router:
         self.last_used: Candidate | None = None
         self.sticky: Candidate | None = None  # the model that answered last in this request
         self._token_cap: dict[tuple[str, str], int] = {}
+        self.only = False
+        manual = getattr(config, "manual", None) or {}
+        if manual.get("provider") in self.providers and manual.get("model"):
+            self.pinned = (manual["provider"], manual["model"])
+            self.only = bool(manual.get("only"))
 
     # ------------------------------------------------------------ ordering
     def candidates(self, role: str = "main") -> list[Candidate]:
@@ -79,25 +87,49 @@ class Router:
             if provider is None or pid in self._disabled:
                 continue
             out.append(Candidate(provider, model.id, model.score, model.latency_ms))
+        if self.pinned and self.pinned[0] in self.providers and self.pinned[0] not in self._disabled \
+                and all((c.provider.id, c.model) != self.pinned for c in out):
+            out.append(Candidate(self.providers[self.pinned[0]], self.pinned[1]))  # picked by hand
         if role == "fast":
             out.sort(key=lambda c: c.latency_ms or 10**9)
         else:  # best first: benchmark score, then speed
             out.sort(key=lambda c: (-(c.score if c.score is not None else 50.0), c.latency_ms or 10**9))
-        if self.sticky is not None:
+        out.sort(key=lambda c: c.provider.paid)  # free before paid (stable: keeps the order above)
+        if self.sticky is not None and not self.sticky.provider.paid:
             out.sort(key=lambda c: c != self.sticky)
         if self.pinned:
             out.sort(key=lambda c: (c.provider.id, c.model) != self.pinned)
+            if self.only:
+                out = [c for c in out if (c.provider.id, c.model) == self.pinned]
         return out
 
     def new_turn(self) -> None:
         """A new user request: start again from the best model."""
         self.sticky = None
 
-    def pin(self, provider_id: str, model: str) -> None:
-        self.pinned = (provider_id, model)
+    def pin(self, provider_id: str, model: str, only: bool = False, remember: bool = False) -> None:
+        """Try this model first (only=True: use nothing else). remember=True keeps the choice
+        in the user's settings for the next start."""
+        if provider_id not in self.providers:
+            raise KeyError(provider_id)
+        self.pinned = (provider_id, model.strip())
+        self.only = only
+        if remember:
+            self.config.manual = {"provider": provider_id, "model": model.strip(), "only": only}
+            self._save_config()
 
-    def unpin(self) -> None:
+    def unpin(self, remember: bool = False) -> None:
         self.pinned = None
+        self.only = False
+        if remember:
+            self.config.manual = {}
+            self._save_config()
+
+    def _save_config(self) -> None:
+        try:
+            self.config.save()
+        except OSError:
+            log.warning("could not save the model choice", exc_info=True)
 
     def _paused_for(self, c: Candidate) -> float:
         now = self.clock()
@@ -105,6 +137,13 @@ class Router:
         return max(0.0, until - now)
 
     # ------------------------------------------------------------ calling
+    def client_for(self, provider: Provider) -> ChatClient:
+        return self._client(provider)
+
+    def has_key(self, provider_id: str) -> bool:
+        provider = self.providers.get(provider_id)
+        return provider is not None and (provider.local or bool(self.key_for(provider_id)))
+
     def _client(self, provider: Provider) -> ChatClient:
         if provider.id not in self._clients:
             key = None if provider.local else self.key_for(provider.id)
@@ -137,7 +176,9 @@ class Router:
             self.on_event(f"{c.label} failed ({err.kind}); trying another model.")
 
     def chat(self, messages: list[dict], tools: list[dict] | None = None, role: str = "main",
-             max_tokens: int | None = None) -> tuple[ChatResult, Candidate]:
+             max_tokens: int | None = None,
+             tools_for: Callable[[Candidate, list[dict]], list[dict]] | None = None) -> tuple[ChatResult, Candidate]:
+        """tools_for(candidate, tools) may add tools only some models get (OpenAI's extras)."""
         candidates = self.candidates(role)
         if not candidates:
             raise NoModelAvailable("No working AI model is set up. Run 'sw-agent setup' first.")
@@ -153,9 +194,10 @@ class Router:
             if wait > 0:
                 soonest = wait if soonest is None else min(soonest, wait)
                 continue
+            offered = tools_for(c, list(tools or [])) if tools_for is not None else tools
             try:
-                result = self._client(c.provider).chat(c.model, messages, tools=tools,
-                                                       tool_choice="auto" if tools else None,
+                result = self._client(c.provider).chat(c.model, messages, tools=offered,
+                                                       tool_choice="auto" if offered else None,
                                                        max_tokens=max_tokens)
             except LLMError as err:
                 log.warning("%s failed: %s (%s)", c.label, err.kind, str(err)[:300])
@@ -186,6 +228,8 @@ class Router:
         rows = []
         for c in self.candidates():
             wait = self._paused_for(c)
-            state = f"paused {wait:.0f} s" if wait else ("pinned" if self.pinned == (c.provider.id, c.model) else "ready")
+            chosen = self.pinned == (c.provider.id, c.model)
+            state = f"paused {wait:.0f} s" if wait else ("only this one" if chosen and self.only
+                                                          else "chosen" if chosen else "ready")
             rows.append((c.provider.name, c.model, state))
         return rows

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from importlib import resources
 from typing import Any, Awaitable, Callable
 
+from . import extras
 from .router import NoModelAvailable, Router
 
 log = logging.getLogger("sw_agent.assistant")
@@ -308,6 +309,31 @@ class Assistant:
         if self.transcript is not None:
             self.transcript.write("info", "new conversation")
 
+    # ---------------------------------------------------------------- OpenAI-only extras
+    def extra_settings(self) -> dict:
+        return getattr(getattr(self.router, "config", None), "openai_tools", None) or {}
+
+    def _tools_for(self, cand: Any, tools: list[dict]) -> list[dict]:
+        if cand.provider.id == "openai":
+            return tools + extras.definitions(self.extra_settings())
+        return tools
+
+    def _run_extra(self, name: str, args: dict, cand: Any) -> str:
+        if cand is None or cand.provider.id != "openai" or name not in extras.enabled_tools(self.extra_settings()):
+            return json.dumps({"ok": False, "error": "NOT_ALLOWED",
+                               "message": f"{name} is switched off, or only allowed for OpenAI models.",
+                               "fix": "Do the task without it, or tell the user how to switch it on."})
+        if name == "web_search":
+            return extras.web_search(self.router.client_for(cand.provider), cand.model, str(args.get("query", "")))
+        if name == "fetch_page":
+            return extras.fetch_page(str(args.get("url", "")))
+        return extras.run_command(str(args.get("command", "")), int(args.get("timeout_s") or 60))
+
+    async def _call(self, name: str, args: dict, cand: Any) -> str:
+        if name in extras.EXTRA_TOOLS:
+            return await asyncio.to_thread(self._run_extra, name, args, cand)
+        return await self.toolbox.call(name, args)
+
     def request_stop(self) -> None:
         """Stop after the step that is running now (a SolidWorks operation is never cut off halfway)."""
         self._stop = True
@@ -376,7 +402,8 @@ class Assistant:
                 return self._stopped()
             self.on_event(Event("thinking", "thinking"))
             try:
-                result, cand = await asyncio.to_thread(self.router.chat, self._window(), tools)
+                result, cand = await asyncio.to_thread(self.router.chat, self._window(), tools,
+                                                       tools_for=self._tools_for)
             except NoModelAvailable as exc:
                 log.warning("no model available: %s", exc)
                 self.on_event(Event("error", str(exc)))
@@ -387,7 +414,8 @@ class Assistant:
                 self.transcript.write("model_answer", result.content[:TRANSCRIPT_CHARS], model=cand.label,
                                       latency_ms=result.latency_ms, usage=result.usage,
                                       tool_calls=len(result.tool_calls))
-            calls = result.tool_calls or rescue_tool_calls(result.content, self.toolbox.tool_names)
+            calls = result.tool_calls or rescue_tool_calls(result.content,
+                                                           self.toolbox.tool_names | set(extras.EXTRA_TOOLS))
             if not calls:
                 reply = result.content.strip() or "(no answer)"
                 self.history.append({"role": "assistant", "content": reply})
@@ -406,7 +434,12 @@ class Assistant:
                 if self._stop:
                     self._answer_rest(calls[n:])
                     return self._stopped()
-                if self.approver is not None and name in REVIEW_TOOLS[self.review]:
+                if name == "run_command" and self.approver is None:
+                    output = json.dumps({"ok": False, "error": "NOT_ALLOWED",
+                                         "message": "Terminal commands need the user's approval, and nobody can approve here."})
+                    self.history.append({"role": "tool", "tool_call_id": call["id"], "content": output})
+                    continue
+                if self.approver is not None and (name in REVIEW_TOOLS[self.review] or name == "run_command"):
                     decision = await self.approver(PendingCall(name, args, cand.label, (result.content or "")[:600]))
                     if decision.action == "stop":
                         self._answer_rest(calls[n:])
@@ -440,7 +473,7 @@ class Assistant:
                                          "fix": "Stop. Tell the user what failed, in plain words, and ask how to "
                                                 "continue (or to send the logs from the Tools menu)."})
                 else:
-                    output = await self.toolbox.call(name, args)
+                    output = await self._call(name, args, cand)
                     try:
                         data = json.loads(output)
                     except ValueError:

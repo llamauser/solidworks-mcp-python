@@ -10,6 +10,12 @@ from sw_mcp.fakes.fake_sw import FakeApp
 
 
 @pytest.fixture(autouse=True)
+def private_settings(monkeypatch, tmp_path_factory):
+    """Settings a test saves (model choice, OpenAI extras) never touch the real %APPDATA%."""
+    monkeypatch.setenv("SW_AGENT_HOME", str(tmp_path_factory.mktemp("sw_agent_home")))
+
+
+@pytest.fixture(autouse=True)
 def clean_runtime():
     """Every test starts with a closed breaker and no cached COM handle."""
     runtime.breaker.reset()

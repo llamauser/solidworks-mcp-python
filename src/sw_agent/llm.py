@@ -20,6 +20,7 @@ APP_URL = "https://github.com/llamauser/solidworks-mcp-python"
 
 
 DEFAULT_MAX_TOKENS = 4096
+REASONING_MIN_TOKENS = 8000
 # Gemini 3 wants each earlier tool call to carry its "thought signature"; calls made by another
 # model have none, and Google documents this value for that case.
 GEMINI_DUMMY_SIGNATURE = "skip_thought_signature_validator"
@@ -141,6 +142,10 @@ class ChatClient:
             raise _classify(httpx.Response(status, json=body))
         return body
 
+    def is_reasoning(self, model: str) -> bool:
+        low = model.lower()
+        return any(low.startswith(p.lower()) for p in self.provider.reasoning_models)
+
     def list_models(self) -> list[dict]:
         body = self._request("GET", "/models")
         data = body.get("data", body) if isinstance(body, dict) else body
@@ -151,8 +156,15 @@ class ChatClient:
              temperature: float = 0.1) -> ChatResult:
         if self.provider.id == "gemini":
             messages = with_thought_signatures(messages)
-        payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": temperature,
-                                   "max_tokens": max_tokens or DEFAULT_MAX_TOKENS}
+        payload: dict[str, Any] = {"model": model, "messages": messages}
+        limit = max_tokens or DEFAULT_MAX_TOKENS
+        if self.is_reasoning(model):
+            # Reasoning models accept only the default temperature, and their thinking counts
+            # against the output limit, so a small limit would leave no room for the answer.
+            limit = max(limit, REASONING_MIN_TOKENS)
+        else:
+            payload["temperature"] = temperature
+        payload[self.provider.max_tokens_param or "max_tokens"] = limit
         if tools:
             payload["tools"] = tools
             if tool_choice:
