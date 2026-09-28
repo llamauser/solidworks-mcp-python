@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "solidworks": {
+      "type": "local",
+      "command": [".venv\\Scripts\\python.exe", "-m", "sw_mcp"],
+      "enabled": true,
+      "timeout": 10000
+    }
+  }
+}

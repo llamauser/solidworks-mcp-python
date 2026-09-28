@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+smoke_test_report.txt
+references/
