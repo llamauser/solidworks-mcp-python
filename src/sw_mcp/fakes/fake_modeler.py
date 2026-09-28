@@ -314,3 +314,26 @@ class FakePart:
 
     def GetBodies2(self, kind: int, visible: bool):
         return (FakeBody(self),) if self.solids else None
+
+
+def make_modeling_app():
+    """A fake SolidWorks application whose NewDocument creates FakePart documents.
+
+    Used by the tests and by `sw-agent bench` (models are scored without real SolidWorks).
+    """
+    from .fake_sw import FakeApp
+
+    app = FakeApp()
+    app.created = []
+    app.closed = []
+
+    def new_document(template, paper, width, height):
+        doc = FakePart(f"Part{len(app.created) + 1}")
+        app.created.append(doc)
+        app.ActiveDoc = doc
+        return doc
+
+    app.GetUserPreferenceStringValue = lambda index: r"C:\templates\part.prtdot"
+    app.NewDocument = new_document
+    app.CloseDoc = lambda title: app.closed.append(title)
+    return app

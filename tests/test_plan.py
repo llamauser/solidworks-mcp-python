@@ -9,7 +9,7 @@ from sw_mcp.sw import modeling as m
 from sw_mcp.sw import plan as p
 from sw_mcp.tools.plan import build_part
 from tests.conftest import parse
-from tests.fakes.fake_modeler import FakePart
+from sw_mcp.fakes.fake_modeler import FakePart
 
 PLATE = {
     "steps": [

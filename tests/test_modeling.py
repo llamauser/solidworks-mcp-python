@@ -11,7 +11,7 @@ from sw_mcp.tools.modeling import (
     repeat_last_shape_around, undo_last_feature,
 )
 from tests.conftest import parse
-from tests.fakes.fake_modeler import FakePart
+from sw_mcp.fakes.fake_modeler import FakePart
 
 
 # ---------------------------------------------------------------- pure geometry
@@ -136,7 +136,7 @@ def test_prism_along_each_axis(part):
 
 
 def test_cylinder_needs_part(fake_app):
-    from tests.fakes.fake_sw import FakeDoc
+    from sw_mcp.fakes.fake_sw import FakeDoc
 
     fake_app.ActiveDoc = FakeDoc(title="A.SLDASM", doc_type=2)
     out = parse(make_cylinder(mode="add", start_x_mm=0, start_y_mm=0, start_z_mm=0,

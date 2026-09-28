@@ -6,7 +6,7 @@ import pytest
 
 from sw_mcp.core import connection
 from sw_mcp.core.resilience import runtime
-from tests.fakes.fake_sw import FakeApp
+from sw_mcp.fakes.fake_sw import FakeApp
 
 
 @pytest.fixture(autouse=True)

@@ -108,6 +108,21 @@ def _attach_running() -> Any:
 
 
 # ---------------------------------------------------------------- public API
+_app_factory: Any = None  # when set, used instead of the real SolidWorks (benchmarks, demos)
+_factory_generation = 0
+
+
+def use_app_factory(factory: Any) -> None:
+    """Make every COM thread use `factory()` instead of attaching to SolidWorks.
+
+    Pass None to go back to the real application. Cached handles are dropped lazily
+    (per thread) because they belong to the COM worker thread, not the caller.
+    """
+    global _app_factory, _factory_generation
+    _app_factory = factory
+    _factory_generation += 1
+
+
 def reset() -> None:
     """Forget this thread's cached handle (after a disconnect, or on thread exit)."""
     _local.app = None
@@ -124,6 +139,13 @@ def is_alive(app: Any) -> bool:
 def get_app(allow_launch: bool = False) -> Any:
     """Return a live SolidWorks application object, or raise SwError explaining why not."""
     global _launched_at
+    if getattr(_local, "generation", 0) != _factory_generation:
+        _local.app = None
+        _local.generation = _factory_generation
+    if _app_factory is not None:
+        if getattr(_local, "app", None) is None:
+            _local.app = _app_factory()
+        return _local.app
     app = getattr(_local, "app", None)
     if app is not None:
         if is_alive(app):

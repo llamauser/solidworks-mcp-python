@@ -73,9 +73,9 @@ def cmd_sync(_: argparse.Namespace) -> int:
 
 
 def cmd_chat(_: argparse.Namespace) -> int:
-    Console().print("The built-in chat assistant arrives in the next update. For now use OpenCode, VS Code "
-                    "Copilot or another app: run [bold]sw-agent connect[/bold] to see how.")
-    return 0
+    from .chat import main as chat_main
+
+    return chat_main()
 
 
 def main(argv: list[str] | None = None) -> int:

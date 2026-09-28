@@ -9,7 +9,7 @@ from sw_mcp.tools.dimensions import set_dimension
 from sw_mcp.tools.documents import open_document, save_document
 from sw_mcp.tools.session import get_status
 from tests.conftest import parse
-from tests.fakes.fake_sw import (
+from sw_mcp.fakes.fake_sw import (
     FakeComponent, FakeDimension, FakeDisplayDimension, FakeDoc, FakeFeature, FakeMate, block_part,
 )
 
@@ -48,7 +48,7 @@ def test_other_tools_do_not_launch(no_solidworks):
 
 def test_reconnects_after_solidworks_restart(fake_app, monkeypatch):
     from sw_mcp.core import connection
-    from tests.fakes.fake_sw import FakeApp
+    from sw_mcp.fakes.fake_sw import FakeApp
 
     assert parse(get_status())["ok"]
     fake_app.alive = False

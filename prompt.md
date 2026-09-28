@@ -195,7 +195,13 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - Deps added: httpx, keyring, rich. Requires Python >= 3.11.
   - 116 tests pass. A live check listed 458 real OpenRouter models, and ranking picks nemotron-3-super first.
 - [ ] **Unverified:** does OpenCode resolve the relative `.venv\\Scripts\\python.exe` command? It should, since it spawns in the project folder. The fallback is `sw-agent connect` / an absolute path.
-- [ ] P3 next: our own terminal assistant `sw-agent chat`, with router + roles (planner/executor/fixer/chat).
+- [x] **P3 done:** `sw-agent` (the default command) and `sw-agent chat`, the terminal assistant.
+  - `router.py`: candidates ordered by bench score, then latency ("fast" role = latency). A rate_limit pauses the provider (for retry_after, or back-off 30→900 s). unavailable/network/bad_request pause the model. Auth disables the provider for the session. The user can pin a model (/use N, /auto). `NoModelAvailable` gives the wait time.
+  - `assistant.py`: Toolbox = in-process MCP Client(create_server()). The LEAN_TOOLS set is default, `/tools full` gives all. The loop runs up to 15 steps and rescues tool calls written as text (a JSON plan → build_part, `<tool_call>` blocks, fenced JSON). The history window starts at a user message and shortens old tool outputs. Tool messages use only standard fields.
+  - `chat.py`: rich UI with /help /models /use /auto /new /tools /quit.
+  - The fakes moved to `src/sw_mcp/fakes/` (the tests import from there), plus `make_modeling_app()`. `connection.use_app_factory(fn)` switches the server to a fake app.
+  - 127 tests pass.
+- [ ] P4 next: `sw-agent bench`.
 
 **Plan:**
 - **P1 Plan-as-data:** the LLM writes the whole part as one JSON plan (the existing primitives). The server validates it with pydantic and executes it deterministically with verification, with a repair loop on errors. This takes about 2–5 LLM requests per part instead of about 30, and makes weak or free models viable. It lives in sw_mcp, so all clients benefit.
