@@ -24,8 +24,8 @@ Watch for these failure patterns:
 
 | Model | 1 | 2 | 3 | 4 | 5 | Notes |
 |-------|---|---|---|---|---|-------|
-| openrouter/qwen/qwen3.8-27b:free (default) | | | | | | |
-| openrouter/nvidia/nemotron-3-super-120b-a12b:free | | | | | | |
+| openrouter/qwen/qwen3.8-27b:free | | | | | | |
+| openrouter/nvidia/nemotron-3-super-120b-a12b:free (default) | | | | | | |
 | openrouter/nvidia/nemotron-3.5-lightning:free | | | | | | |
 | openrouter/google/gemma-4-31b-it:free | | | | | | |
 | openrouter/inclusionai/ling-3.0-flash-fin:free | | | | | | |

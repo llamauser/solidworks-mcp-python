@@ -1,7 +1,7 @@
 ---
 description: Builds, inspects and edits SolidWorks parts using only the solidworks tools
 mode: primary
-model: openrouter/qwen/qwen3.8-27b:free
+model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
 temperature: 0.1
 steps: 40
 permission:

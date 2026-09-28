@@ -33,8 +33,11 @@ and pick OpenRouter; this needs an OpenRouter account and API key.
 
 Run `opencode` in this folder. It reads `opencode.json`, starts the server over stdio, and opens
 the **solidworks** agent (`.opencode/agents/solidworks.md`) by default. The agent:
-- uses `openrouter/qwen/qwen3.8-27b:free`. To try another free model, change the `model:`
-  line in the agent file; free OpenRouter model IDs end in `:free`.
+- uses `openrouter/nvidia/nemotron-3-super-120b-a12b:free`. To try another free model, change
+  the `model:` line in the agent file; free OpenRouter model IDs end in `:free`. If a model
+  answers "temporarily rate-limited upstream", its free provider is overloaded. Switch to
+  another one, e.g. `openrouter/nvidia/nemotron-3-ultra-550b-a55b:free` (the largest) or
+  `openrouter/thinkingmachines/inkling:free`.
 - can only use the SolidWorks tools. Every built-in OpenCode tool (shell, file edits, web…) is
   denied, so the model cannot drift into writing its own COM scripts.
 - uses a short system prompt of its own instead of OpenCode's long coding prompt.
