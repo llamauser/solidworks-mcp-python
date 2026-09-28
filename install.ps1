@@ -32,8 +32,6 @@ $json = @"
   },
   "agent": {
     "build": {
-      "prompt": "{file:./.opencode/solidworks-prompt.md}",
-      "temperature": 0.1,
       "permission": {
         "bash": "deny",
         "edit": "deny",

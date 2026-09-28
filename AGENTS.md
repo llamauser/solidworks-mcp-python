@@ -1,3 +1,5 @@
+# SolidWorks assistant rules
+
 You help the user inspect and change the model that is open in SolidWorks.
 
 Rules:

@@ -28,10 +28,10 @@ installs.
 ## Using it from OpenCode
 
 Run `opencode` in this folder. It reads `opencode.json` and starts the server itself over stdio.
-In this folder, the default **build** agent is reconfigured by `opencode.json`: it uses the
-instructions in `.opencode/solidworks-prompt.md` and may only use the SolidWorks tools. Shell and
-file editing are denied, so the model cannot drift into writing its own COM scripts. Pick a model
-and ask, for example:
+In this folder, `opencode.json` restricts the default **build** agent to the SolidWorks tools.
+Shell and file editing are denied, so the model cannot drift into writing its own COM scripts.
+The working rules for the model are in `AGENTS.md`, which OpenCode loads automatically.
+Pick a model and ask, for example:
 
 > What is open in SolidWorks? … *(click a face)* … make this 5 mm thicker and export a STEP to C:\Temp\part.step
 
@@ -88,8 +88,9 @@ OpenCode `"type": "remote"` entry with `"url": "http://127.0.0.1:8765/mcp"`.
 - **"OpenCode's free tier can only be used from within OpenCode".** This is an OpenCode bug
   ([anomalyco/opencode#50806](https://github.com/anomalyco/opencode/issues/50806),
   [#49592](https://github.com/anomalyco/opencode/issues/49592)): free models only accept requests
-  from the built-in `build` agent. That is why this project reconfigures `build` instead of
-  adding a custom agent. Session titles and auto-compaction can hit the same error on free
+  from the built-in `build` agent with OpenCode's own system prompt. That is why this project
+  never replaces the agent prompt: the rules live in `AGENTS.md`, and `opencode.json` only
+  sets tool permissions. Session titles and auto-compaction can hit the same error on free
   models; start a new session when a long one stops.
 
 - **`SW_STARTING` never ends.** SolidWorks is running but not visible to COM. Close any

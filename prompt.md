@@ -134,7 +134,8 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
 - [x] **Smoke test on the user's SolidWorks PC: 15/15 passed** (2026-09-28). Setup: SOLIDWORKS **2024 SP1**, **French** install (the extrude is named `Boss.-Extru.1`), Python 3.14.7. The Windows user there is `rima`. The server started in 1.0 s, and tool calls took 10–1300 ms.
   - Verified: `IFace2.Normal` points **out of the material** (top face gives [0,1,0]). Opening, SaveAs export (STEP), Save, the `SystemValue` setter with rebuild, dimension naming (`D1@<feature>`), face and edge readback, and plane selection by tree position on a French install.
   - Still unverified: the selection-type readers for mates, components, dimensions and sketch entities (21, 20, 14, 10, 11), and assemblies in general.
-- [ ] Waiting on the user: whether OpenCode works with the reconfigured `build` agent.
+- [x] The `build` override with a custom `prompt` still failed with the same free-tier error. The free model **worked in another folder but not in this project**. Working theory: the free tier rejects requests whose system prompt is not OpenCode's own (custom agents, `title` and `compaction` fail for the same reason). **Change:** removed the `prompt` and `temperature` override. The rules moved to `AGENTS.md`, which OpenCode loads automatically, and `opencode.json` now only sets `agent.build.permission`.
+- [ ] Waiting on the user: does this config work? If not, bisect: (a) opencode.json with only the `mcp` block, (b) (a) plus AGENTS.md renamed away, (c) no opencode.json at all.
 
 ### Next batch after the smoke report
 `new_part`, `create_sketch(plane: front|top|right)` (by tree position), `sketch_rectangle`, `sketch_circle`, `extrude`, `cut`, `fillet_selected_edges`, `list_mates`. `build_block()` in the smoke test is a working starting point for the modelling calls.
