@@ -19,7 +19,7 @@ def get_selection_context(
     Use when: the user says "this face", "this hole", "this edge", "make it thicker".
     Call it BEFORE any tool that changes the model, because changes clear the selection.
     Returns items like:
-      face: surface (plane/cylinder), normal, radius_mm, area_mm2, feature, dims
+      face: surface (plane/cylinder), normal (points out of the part), radius_mm, area_mm2, feature, dims
       edge: kind (line/arc/circle), length_mm, radius_mm
       dimension: name, value, unit      mate: mate_type, components
     Each "dims" entry has a name like "D1@Boss-Extrude1" to pass to set_dimension.

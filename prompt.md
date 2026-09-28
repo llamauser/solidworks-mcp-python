@@ -131,13 +131,10 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
 - [x] Wrote `opencode.json`, `.opencode/agents/solidworks.md` (denies bash, edit, webfetch, websearch and task; allows `solidworks_*`), `install.ps1` (tested here: writes opencode.json as valid JSON with no BOM), `docs/model-test-prompts.md`, `README.md` and `.gitignore`.
 - [x] Pushed to the private repo https://github.com/llamauser/solidworks-mcp-python (`references/` is excluded).
 - [x] **Changed after the user's first OpenCode run:** OpenCode's free tier rejects custom agents with "OpenCode's free tier can only be used from within OpenCode" (anomalyco/opencode#50806, #49592; only `agent=build` is accepted). The custom agent `.opencode/agents/solidworks.md` was **removed**. `opencode.json` (and `install.ps1`) now reconfigure the built-in `build` agent instead: prompt `{file:./.opencode/solidworks-prompt.md}`, temperature 0.1, and the same deny/allow permissions. The notes above about a custom agent file are superseded.
-- [ ] **Waiting on the user:** run `install.ps1` and `scripts/smoke_test.py` on the SolidWorks PC, then paste back `smoke_test_report.txt`.
-
-### Not yet verified on real SolidWorks (check these in the smoke report)
-- Whether `IFace2.Normal` points out of the material. The smoke test prints the top-face normal as INFO.
-- `OpenDoc7` + `GetOpenDocSpec`, `Extension.SaveAs` with a null-dispatch ExportData, and the `dim.SystemValue` setter under pywin32 late binding. Fallbacks exist for each.
-- The `IDimension.FullName` format, and whether `Parameter()` accepts the first two `@` segments.
-- The selection type numbers for mates, components and dimensions (21, 20, 14).
+- [x] **Smoke test on the user's SolidWorks PC: 15/15 passed** (2026-09-28). Setup: SOLIDWORKS **2024 SP1**, **French** install (the extrude is named `Boss.-Extru.1`), Python 3.14.7. The Windows user there is `rima`. The server started in 1.0 s, and tool calls took 10–1300 ms.
+  - Verified: `IFace2.Normal` points **out of the material** (top face gives [0,1,0]). Opening, SaveAs export (STEP), Save, the `SystemValue` setter with rebuild, dimension naming (`D1@<feature>`), face and edge readback, and plane selection by tree position on a French install.
+  - Still unverified: the selection-type readers for mates, components, dimensions and sketch entities (21, 20, 14, 10, 11), and assemblies in general.
+- [ ] Waiting on the user: whether OpenCode works with the reconfigured `build` agent.
 
 ### Next batch after the smoke report
 `new_part`, `create_sketch(plane: front|top|right)` (by tree position), `sketch_rectangle`, `sketch_circle`, `extrude`, `cut`, `fillet_selected_edges`, `list_mates`. `build_block()` in the smoke test is a working starting point for the modelling calls.
