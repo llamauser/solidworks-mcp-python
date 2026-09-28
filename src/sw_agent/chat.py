@@ -11,6 +11,7 @@ from rich.table import Table
 
 from .assistant import LEAN_TOOLS, Assistant, Event, Toolbox
 from .config import UserConfig
+from .logs import Transcript, setup_logging
 from .router import Router
 
 HELP = """[bold]Just type what you want[/bold], for example:
@@ -56,6 +57,7 @@ def models_table(router: Router) -> Table:
 
 async def run_chat(console: Console | None = None) -> int:
     console = console or Console()
+    setup_logging()
     config = UserConfig.load()
     if not config.working_models():
         console.print(Panel("No AI model is connected yet.\nRun [bold]sw-agent setup[/bold] first "
@@ -67,7 +69,8 @@ async def run_chat(console: Console | None = None) -> int:
     tool_names: tuple[str, ...] | None = LEAN_TOOLS
     while True:
         async with Toolbox(tool_names) as toolbox:
-            assistant = Assistant(router, toolbox, on_event=lambda e: render(console, e))
+            assistant = Assistant(router, toolbox, on_event=lambda e: render(console, e),
+                                  transcript=Transcript("terminal"))
             switch = await _loop(console, router, assistant)
         if switch == "quit":
             return 0

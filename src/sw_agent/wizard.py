@@ -10,6 +10,8 @@ from __future__ import annotations
 import webbrowser
 from typing import Callable
 
+import logging
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -19,6 +21,8 @@ from . import keys
 from .config import ModelEntry, UserConfig
 from .probe import Discovery, discover
 from .registry import Provider, load_providers
+
+log = logging.getLogger("sw_agent.setup")
 
 PRIVACY_STYLE = {"no-training": "green", "local": "green", "depends": "yellow", "may-train": "bold red"}
 MAX_KEY_TRIES = 3
@@ -127,6 +131,8 @@ class Wizard:
             return False
         with c.status(f"Checking {p.name} and testing which models can use tools..."):
             found = self.discover_fn(p, key)
+        log.info("setup %s: key_ok=%s models=%s error=%s checks=%s", p.id, found.key_ok, found.model_count,
+                 found.error[:200], [(ch.model, ch.tools_ok, ch.detail[:80]) for ch in found.checks])
         if not found.key_ok:
             if p.local:
                 c.print(f"[yellow]{p.name} is not running.[/yellow] {p.requires}")

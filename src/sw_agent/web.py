@@ -24,6 +24,7 @@ from starlette.routing import Route
 
 from .assistant import LEAN_TOOLS, Assistant, Toolbox
 from .config import UserConfig
+from .logs import Transcript, setup_logging
 from .router import Router
 
 POLL_WAIT_S = 20.0
@@ -59,7 +60,8 @@ async def default_backend():
         yield router, toolbox
 
 
-def create_app(backend: SessionFactory = default_backend, token: str | None = None) -> Starlette:
+def create_app(backend: SessionFactory = default_backend, token: str | None = None,
+               transcript_factory: Callable[[], Any] = lambda: None) -> Starlette:
     token = token or secrets.token_urlsafe(24)
     state: dict[str, WebSession] = {}
 
@@ -67,7 +69,8 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
     async def lifespan(app: Starlette):
         async with backend() as (router, toolbox):
             session = WebSession(assistant=None, router=router)  # type: ignore[arg-type]
-            session.assistant = Assistant(router, toolbox, on_event=lambda e: session.push(e.kind, e.text))
+            session.assistant = Assistant(router, toolbox, on_event=lambda e: session.push(e.kind, e.text),
+                                          transcript=transcript_factory())
             state["s"] = session
             if not router.candidates():
                 session.push("error", "No AI model is connected yet. Close this window and run "
@@ -180,6 +183,7 @@ def free_port(preferred: int = 8777) -> int:
 def main(open_browser: bool = True, port: int | None = None) -> int:
     import uvicorn
 
+    setup_logging()
     port = port or free_port()
     url = f"http://127.0.0.1:{port}/"
     print(f"SolidWorks Assistant is running at {url}  (close this window to stop it)")
@@ -187,5 +191,6 @@ def main(open_browser: bool = True, port: int | None = None) -> int:
         import threading
 
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
-    uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
+    uvicorn.run(create_app(transcript_factory=lambda: Transcript("browser")), host="127.0.0.1", port=port,
+                log_level="warning")
     return 0

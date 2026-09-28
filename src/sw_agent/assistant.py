@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import uuid
 from contextlib import AsyncExitStack
@@ -19,6 +20,9 @@ from importlib import resources
 from typing import Any, Callable
 
 from .router import NoModelAvailable, Router
+
+log = logging.getLogger("sw_agent.assistant")
+TRANSCRIPT_CHARS = 8000
 
 LEAN_TOOLS = (
     "get_status", "open_document", "save_document", "build_part", "get_model_summary",
@@ -184,10 +188,18 @@ class Event:
 
 class Assistant:
     def __init__(self, router: Router, toolbox: Toolbox, on_event: Callable[[Event], None] | None = None,
-                 max_steps: int = MAX_STEPS) -> None:
+                 max_steps: int = MAX_STEPS, transcript: Any = None) -> None:
         self.router = router
         self.toolbox = toolbox
-        self.on_event = on_event or (lambda e: None)
+        self.transcript = transcript
+        show = on_event or (lambda e: None)
+
+        def emit(event: Event) -> None:
+            if self.transcript is not None and event.kind != "thinking":
+                self.transcript.write(event.kind, event.text)
+            show(event)
+
+        self.on_event = emit
         self.max_steps = max_steps
         self.system = system_prompt()
         self.history: list[dict] = []
@@ -195,6 +207,8 @@ class Assistant:
 
     def reset(self) -> None:
         self.history.clear()
+        if self.transcript is not None:
+            self.transcript.write("info", "new conversation")
 
     def _window(self) -> list[dict]:
         """System prompt + recent history, starting at a user message, with old tool output shortened."""
@@ -214,14 +228,22 @@ class Assistant:
 
     async def send(self, text: str) -> str:
         self.history.append({"role": "user", "content": text})
+        if self.transcript is not None:
+            self.transcript.write("user", text)
+        log.info("user message (%d chars)", len(text))
         tools = self.toolbox.tools
         for _ in range(self.max_steps):
             self.on_event(Event("thinking", "thinking"))
             try:
                 result, cand = await asyncio.to_thread(self.router.chat, self._window(), tools)
             except NoModelAvailable as exc:
+                log.warning("no model available: %s", exc)
                 self.on_event(Event("error", str(exc)))
                 return str(exc)
+            if self.transcript is not None:
+                self.transcript.write("model_answer", result.content[:TRANSCRIPT_CHARS], model=cand.label,
+                                      latency_ms=result.latency_ms, usage=result.usage,
+                                      tool_calls=len(result.tool_calls))
             calls = result.tool_calls or rescue_tool_calls(result.content, self.toolbox.tool_names)
             if not calls:
                 reply = result.content.strip() or "(no answer)"
@@ -237,8 +259,12 @@ class Assistant:
             for call in calls:
                 name = call["function"]["name"]
                 args = parse_args(call["function"]["arguments"])
+                if self.transcript is not None:
+                    self.transcript.write("tool_call", name, arguments=json.dumps(args)[:TRANSCRIPT_CHARS])
                 self.on_event(Event("tool", name))
                 output = await self.toolbox.call(name, args)
+                if self.transcript is not None:
+                    self.transcript.write("tool_output", output[:TRANSCRIPT_CHARS], tool=name)
                 self.on_event(Event("result", summarize_result(output)))
                 self.history.append({"role": "tool", "tool_call_id": call["id"],
                                      "content": output[:TOOL_RESULT_CHARS]})

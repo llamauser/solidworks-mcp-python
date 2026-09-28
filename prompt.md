@@ -230,6 +230,13 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - `docs/GETTING_STARTED.md` for non-coders; the README links to it.
   - 149 tests pass.
 
+- [x] **Logging (added after the user asked for logs):**
+  - `src/sw_agent/logs.py`: `setup_logging()` writes the sw-agent logs to the same file as the server (`%LOCALAPPDATA%\sw_mcp\sw_mcp.log`). The router logs every request (model, ms, tokens) and every failure; the wizard logs its test results (never keys).
+  - `Transcript` writes `%LOCALAPPDATA%\sw_mcp\conversations\<time>_<terminal|browser>.jsonl`: user, model_answer (model / latency / usage), tool_call (full arguments), tool_output, reply, errors.
+  - `sw-agent logs` / `Collect logs.bat` zip the logs, the last 20 conversations, config.json (renamed provider_tests.json), smoke_test_report.txt and system.txt onto the Desktop.
+  - Before this commit, sw-agent chat/web sessions were NOT logged to a file (only OpenCode/VS Code/smoke-test runs of `python -m sw_mcp` were).
+  - 151 tests pass.
+
 **ALL PHASES (P1–P6) BUILT. NEXT: the user tests on the SolidWorks PC.**
 1. `git pull`, then double-click `Install SolidWorks Assistant.bat` (connect providers, create the shortcut).
 2. `.venv\Scripts\python scripts\smoke_test.py` and send the report. Phase 5 real-SW calls are unverified: InsertMoveCopyBody2, InsertCombineFeature, FeatureRevolve2 + CreateCenterLine, AddComponent5 placement.

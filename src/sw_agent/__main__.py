@@ -5,6 +5,7 @@
   sw-agent connect   use the SolidWorks tools from other apps (VS Code, Claude Desktop, ...)
   sw-agent sync      regenerate the per-app instruction files from src/sw_mcp/guide.md
   sw-agent web       the assistant in your browser
+  sw-agent logs      zip the logs onto the Desktop to send to the developer
   sw-agent           the assistant in this terminal (same as `sw-agent chat`)
 """
 
@@ -26,9 +27,23 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def cmd_setup(_: argparse.Namespace) -> int:
+    from .logs import setup_logging
     from .wizard import Wizard
 
+    setup_logging()
     Wizard().run()
+    return 0
+
+
+def cmd_logs(_: argparse.Namespace) -> int:
+    from .logs import collect, log_dir
+
+    path = collect()
+    console = Console()
+    console.print(f"[green]Saved:[/green] {path}")
+    console.print("Send this file to the developer. It has the logs, your recent conversations and the "
+                  "provider test results. It does NOT contain your API keys.")
+    console.print(f"[dim]The raw logs are in {log_dir()}[/dim]")
     return 0
 
 
@@ -80,6 +95,9 @@ def cmd_bench(args: argparse.Namespace) -> int:
     from .bench import TASKS, estimate_requests, run_bench
     from .router import Router
 
+    from .logs import setup_logging
+
+    setup_logging()
     console = Console()
     cfg = UserConfig.load()
     router = Router(cfg)
@@ -126,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         ("chat", cmd_chat, "start the assistant"),
         ("bench", cmd_bench, "score connected models on SolidWorks tasks"),
         ("web", cmd_web, "open the assistant in your browser"),
+        ("logs", cmd_logs, "collect logs into a zip on the Desktop (no keys)"),
     ):
         p = sub.add_parser(name, help=text)
         p.set_defaults(func=fn)

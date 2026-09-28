@@ -88,7 +88,10 @@ If the result is not right, just say what to change: "the holes should be 8 mm, 
 | "SolidWorks is starting" | Wait 30 seconds and ask again. |
 | "SolidWorks is busy" or no answer | Look at SolidWorks: close any open dialog box, then try again. |
 | The page says it lost the connection | The black window was closed. Double-click **SolidWorks Assistant** again. |
-| Anything else | Close everything and start again. If it keeps happening, send the project owner the file `%LOCALAPPDATA%\sw_mcp\sw_mcp.log`. |
+| Anything else | Close everything and start again. If it keeps happening, double-click **Collect logs.bat** in the folder and send the zip it puts on your Desktop to the project owner. |
+
+Every conversation is recorded on this PC (in `%LOCALAPPDATA%\sw_mcp`) so problems can be
+investigated. **Collect logs.bat** packs those records into one zip. It never contains your API keys.
 
 ## Good to know
 

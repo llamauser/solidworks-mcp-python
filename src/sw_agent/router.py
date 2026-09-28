@@ -7,6 +7,7 @@ refused key disables that provider for the session. The user can pin one model.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -15,6 +16,8 @@ from . import keys
 from .config import UserConfig
 from .llm import ChatClient, ChatResult, LLMError
 from .registry import Provider, load_providers
+
+log = logging.getLogger("sw_agent.router")
 
 MODEL_PAUSE_S = {"unavailable": 120.0, "network": 60.0, "bad_request": 600.0}
 RATE_LIMIT_START_S = 30.0
@@ -129,13 +132,18 @@ class Router:
                                                        tool_choice="auto" if tools else None,
                                                        max_tokens=max_tokens)
             except LLMError as err:
+                log.warning("%s failed: %s (%s)", c.label, err.kind, str(err)[:300])
                 self._penalize(c, err)
                 continue
+            usage = result.usage or {}
+            log.info("%s answered in %d ms (tokens in %s, out %s, tool calls %d)", c.label, result.latency_ms,
+                     usage.get("prompt_tokens", "?"), usage.get("completion_tokens", "?"), len(result.tool_calls))
             self._provider_backoff.pop(c.provider.id, None)
             if self.last_used and self.last_used != c:
                 self.on_event(f"Now using {c.label}.")
             self.last_used = c
             return result, c
+        log.warning("no model could answer (soonest retry %s s)", soonest)
         if soonest is not None:
             raise NoModelAvailable(f"All connected models are busy or rate-limited. Try again in about "
                                    f"{soonest:.0f} s, or connect more providers with 'sw-agent setup'.")
