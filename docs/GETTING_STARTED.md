@@ -68,9 +68,11 @@ While it works, you see each step ("Building the part...", "Saving..."), then a 
 - **Say where things go:** "4 holes of 6 mm, 10 mm in from each side".
 - **Point at things:** click a face in SolidWorks, then write "make this 3 mm thicker".
 - **Ask to save:** "save it as C:\Parts\plate.SLDPRT" or "export a STEP file".
-- **Machines with several parts:** say so, and give the project a name. For example: "make a
-  simple V4 engine as an assembly, project name V4 engine". Each part is saved into
-  `Documents\SolidWorks Assistant\V4 engine`, and an assembly is made at the end.
+- **Engines:** just ask: "make a V4 engine and show it running". The assistant builds the whole
+  engine (block, crankshaft, rods, pistons, heads) in one go, puts it together and can turn it or
+  make a motion study. It takes a few minutes in SolidWorks.
+- **Other machines with several parts:** say so, and give the project a new name. Each part is saved
+  into `Documents\SolidWorks Assistant\<project>`, and an assembly is made at the end.
 
 If the result is not right, just say what to change: "the holes should be 8 mm, not 6".
 

@@ -23,7 +23,7 @@ def build_part(
     Units mm. Axes: X right, Y up, Z toward the viewer. Base on y=0, centered on x=0, z=0.
     Step kinds:
     {"op":"box","mode":"add|cut","x":[min,max],"y":[min,max],"z":[min,max]}
-    {"op":"cylinder","mode":"add|cut","start":[x,y,z],"end":[x,y,z],"diameter":d}  (along X, Y or Z)
+    {"op":"cylinder","mode":"add|cut","start":[x,y,z],"end":[x,y,z],"diameter":d}  (straight, or slanted in one plane)
     {"op":"prism","mode":"add|cut","axis":"z","points":[[a,b],...],"start":s,"end":e}  (points: (x,y) for z, (x,z) for y, (y,z) for x)
     {"op":"revolve","mode":"add|cut","axis":"y","center":[0,0,0],"profile":[[r,h],...],"angle":360}  (r = distance from the axis, h = position along it)
     {"op":"fillet|chamfer","size":r,"edges":"vertical|top|bottom|parallel_x|parallel_z|circular|all"}

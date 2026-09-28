@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 
 import httpx
@@ -79,12 +80,18 @@ def rank_models(provider: Provider, models: list[dict]) -> list[str]:
     return sorted(dict.fromkeys(ids), key=score)
 
 
-def check_tools(client: ChatClient, model: str) -> ModelCheck:
-    try:
-        res = client.chat(model, PROBE_MESSAGES, tools=[PROBE_TOOL], tool_choice="auto", max_tokens=300,
-                          temperature=0)
-    except LLMError as exc:
-        return ModelCheck(model, False, detail=f"{exc.kind}: {exc}"[:160])
+def check_tools(client: ChatClient, model: str, sleep=time.sleep) -> ModelCheck:
+    for attempt in (1, 2):
+        try:
+            res = client.chat(model, PROBE_MESSAGES, tools=[PROBE_TOOL], tool_choice="auto", max_tokens=300,
+                              temperature=0)
+            break
+        except LLMError as exc:
+            # Some free tiers allow ~1 request a second (Mistral): wait briefly and try once more.
+            if attempt == 1 and exc.kind == "rate_limit" and (exc.retry_after or 2) <= 10:
+                sleep(exc.retry_after or 2)
+                continue
+            return ModelCheck(model, False, detail=f"{exc.kind}: {exc}"[:160])
     for call in res.tool_calls:
         fn = call.get("function") or {}
         if fn.get("name") != "add_numbers":

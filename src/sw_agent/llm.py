@@ -6,6 +6,7 @@ provider, come back later), an unavailable model, or a request the model cannot 
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -18,14 +19,26 @@ APP_NAME = "SolidWorks Assistant"
 APP_URL = "https://github.com/llamauser/solidworks-mcp-python"
 
 
-class LLMError(Exception):
-    """kind: auth | rate_limit | unavailable | bad_request | network"""
+DEFAULT_MAX_TOKENS = 4096
+# Gemini 3 wants each earlier tool call to carry its "thought signature"; calls made by another
+# model have none, and Google documents this value for that case.
+GEMINI_DUMMY_SIGNATURE = "skip_thought_signature_validator"
+_LIMIT = re.compile(r"\bLimit:?\s*(\d{3,})", re.I)
+_TRY_AGAIN = re.compile(r"try again in\s*(?:(\d+)m)?\s*([\d.]+)s", re.I)
 
-    def __init__(self, kind: str, message: str, status: int | None = None, retry_after: float | None = None):
+
+class LLMError(Exception):
+    """kind: auth | rate_limit | too_large | bad_output | unavailable | bad_request | network
+
+    token_limit: the per-minute token cap the provider named (for rate_limit / too_large)."""
+
+    def __init__(self, kind: str, message: str, status: int | None = None, retry_after: float | None = None,
+                 token_limit: int | None = None):
         super().__init__(message)
         self.kind = kind
         self.status = status
         self.retry_after = retry_after
+        self.token_limit = token_limit
 
 
 @dataclass
@@ -55,10 +68,18 @@ def _classify(resp: httpx.Response) -> LLMError:
     text = _error_text(resp)
     retry = resp.headers.get("retry-after")
     retry_after = float(retry) if retry and retry.replace(".", "", 1).isdigit() else None
+    if retry_after is None and (m := _TRY_AGAIN.search(text)):
+        retry_after = int(m.group(1) or 0) * 60 + float(m.group(2))
+    limit = int(m.group(1)) if (m := _LIMIT.search(text)) and "token" in text.lower() else None
+    low = text.lower()
     if status in (401, 403):
         return LLMError("auth", f"The key was refused ({status}): {text}", status)
-    if status == 429 or "rate" in text.lower() and "limit" in text.lower():
-        return LLMError("rate_limit", f"Rate limited: {text}", status, retry_after)
+    if status == 413 or "request too large" in low or "reduce your message size" in low:
+        return LLMError("too_large", f"Request too large: {text}", status, retry_after, limit)
+    if status == 429 or "rate" in low and "limit" in low:
+        return LLMError("rate_limit", f"Rate limited: {text}", status, retry_after, limit)
+    if "failed to call a function" in low or "failed_generation" in low or "tool_use_failed" in low:
+        return LLMError("bad_output", f"The model wrote a broken tool call: {text}", status)
     if status == 402:
         return LLMError("rate_limit", f"Out of free credit or quota: {text}", status, retry_after)
     if status in (404, 410):
@@ -66,6 +87,24 @@ def _classify(resp: httpx.Response) -> LLMError:
     if status >= 500:
         return LLMError("unavailable", f"Provider error {status}: {text}", status, retry_after)
     return LLMError("bad_request", f"Request refused ({status}): {text}", status)
+
+
+def with_thought_signatures(messages: list[dict]) -> list[dict]:
+    """Give every earlier tool call a thought signature (Gemini refuses the request otherwise)."""
+    out = []
+    for msg in messages:
+        calls = msg.get("tool_calls")
+        if msg.get("role") == "assistant" and calls:
+            fixed = []
+            for c in calls:
+                google = ((c.get("extra_content") or {}).get("google") or {})
+                if not google.get("thought_signature"):
+                    c = {**c, "extra_content": {**(c.get("extra_content") or {}),
+                                                "google": {**google, "thought_signature": GEMINI_DUMMY_SIGNATURE}}}
+                fixed.append(c)
+            msg = {**msg, "tool_calls": fixed}
+        out.append(msg)
+    return out
 
 
 class ChatClient:
@@ -110,13 +149,14 @@ class ChatClient:
     def chat(self, model: str, messages: list[dict], tools: list[dict] | None = None,
              tool_choice: str | None = None, max_tokens: int | None = None,
              temperature: float = 0.1) -> ChatResult:
-        payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": temperature}
+        if self.provider.id == "gemini":
+            messages = with_thought_signatures(messages)
+        payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": temperature,
+                                   "max_tokens": max_tokens or DEFAULT_MAX_TOKENS}
         if tools:
             payload["tools"] = tools
             if tool_choice:
                 payload["tool_choice"] = tool_choice
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
         started = time.monotonic()
         body = self._request("POST", "/chat/completions", json=payload)
         latency = int((time.monotonic() - started) * 1000)

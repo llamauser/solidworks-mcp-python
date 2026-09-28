@@ -25,6 +25,7 @@ class ModelEntry:
     tools_ok: bool
     latency_ms: int = 0
     score: float | None = None  # filled by the benchmark (phase 4)
+    note: str = ""              # why the tool check failed (shown in the log bundle)
 
 
 @dataclass

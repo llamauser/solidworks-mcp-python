@@ -1,12 +1,16 @@
 """Pick a working model for every request, and switch automatically when one fails.
 
-Order: benchmark score (best first), then answer speed. A rate-limited provider is paused
-for the time it asks (or a growing back-off); a broken model is paused for a while; a
-refused key disables that provider for the session. The user can pin one model.
+Order: benchmark score (best first), then answer speed. Within one user request the router
+sticks to the model that answered last (switching back and forth costs rate limit on both).
+A rate-limited provider is paused for the time it asks (or a growing back-off); a broken model
+is paused for a while; a refused key disables that provider for the session. Free tiers cap the
+tokens per minute (Groq: 7000-8000), so the cap a provider names is remembered and requests
+larger than it go to another model. The user can pin one model.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -19,7 +23,8 @@ from .registry import Provider, load_providers
 
 log = logging.getLogger("sw_agent.router")
 
-MODEL_PAUSE_S = {"unavailable": 120.0, "network": 60.0, "bad_request": 600.0}
+MODEL_PAUSE_S = {"unavailable": 120.0, "network": 60.0, "bad_request": 600.0, "bad_output": 15.0}
+CHARS_PER_TOKEN = 3.2  # conservative: measured about 3.4 on our requests
 RATE_LIMIT_START_S = 30.0
 RATE_LIMIT_MAX_S = 900.0
 
@@ -63,6 +68,8 @@ class Router:
         self._disabled: set[str] = set()
         self.pinned: tuple[str, str] | None = None
         self.last_used: Candidate | None = None
+        self.sticky: Candidate | None = None  # the model that answered last in this request
+        self._token_cap: dict[tuple[str, str], int] = {}
 
     # ------------------------------------------------------------ ordering
     def candidates(self, role: str = "main") -> list[Candidate]:
@@ -76,9 +83,15 @@ class Router:
             out.sort(key=lambda c: c.latency_ms or 10**9)
         else:  # best first: benchmark score, then speed
             out.sort(key=lambda c: (-(c.score if c.score is not None else 50.0), c.latency_ms or 10**9))
+        if self.sticky is not None:
+            out.sort(key=lambda c: c != self.sticky)
         if self.pinned:
             out.sort(key=lambda c: (c.provider.id, c.model) != self.pinned)
         return out
+
+    def new_turn(self) -> None:
+        """A new user request: start again from the best model."""
+        self.sticky = None
 
     def pin(self, provider_id: str, model: str) -> None:
         self.pinned = (provider_id, model)
@@ -105,7 +118,14 @@ class Router:
             self._disabled.add(pid)
             self.on_event(f"{c.provider.name}: the key was refused, not using it this session "
                           "(run 'sw-agent setup' to fix it).")
-        elif err.kind == "rate_limit":
+            return
+        if err.token_limit:
+            self._token_cap[(pid, c.model)] = err.token_limit
+        if err.kind == "too_large":
+            self.on_event(f"{c.label} only takes {err.token_limit or 'smaller'} tokens a minute; "
+                          "using another model for this request.")
+            return
+        if err.kind == "rate_limit":
             backoff = min(RATE_LIMIT_MAX_S, self._provider_backoff.get(pid, RATE_LIMIT_START_S / 2) * 2)
             self._provider_backoff[pid] = backoff
             wait = err.retry_after if err.retry_after else backoff
@@ -121,8 +141,14 @@ class Router:
         candidates = self.candidates(role)
         if not candidates:
             raise NoModelAvailable("No working AI model is set up. Run 'sw-agent setup' first.")
+        size = int((len(json.dumps(messages)) + len(json.dumps(tools or []))) / CHARS_PER_TOKEN)
         soonest = None
+        too_big = []
         for c in candidates:
+            cap = self._token_cap.get((c.provider.id, c.model))
+            if cap and size > cap * 0.95:
+                too_big.append(c.label)
+                continue
             wait = self._paused_for(c)
             if wait > 0:
                 soonest = wait if soonest is None else min(soonest, wait)
@@ -142,8 +168,13 @@ class Router:
             if self.last_used and self.last_used != c:
                 self.on_event(f"Now using {c.label}.")
             self.last_used = c
+            self.sticky = c
             return result, c
-        log.warning("no model could answer (soonest retry %s s)", soonest)
+        log.warning("no model could answer (soonest retry %s s, too big for %s)", soonest, too_big)
+        if soonest is None and too_big:
+            raise NoModelAvailable("This conversation has grown too long for the connected free models. "
+                                   "Start a new conversation (the work in SolidWorks is kept), or connect a "
+                                   "provider with a larger allowance (Gemini, Mistral, NVIDIA) with 'sw-agent setup'.")
         if soonest is not None:
             raise NoModelAvailable(f"All connected models are busy or rate-limited. Try again in about "
                                    f"{soonest:.0f} s, or connect more providers with 'sw-agent setup'.")

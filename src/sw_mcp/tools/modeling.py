@@ -60,7 +60,7 @@ def make_cylinder(
 ) -> dict:
     """Add a round rod/boss, or cut a round hole, between two end centers (mm).
 
-    It must run along X, Y or Z: only one coordinate may differ between start and end.
+    It may be slanted: start and end may differ in two coordinates (one must stay the same).
     Use when: holes, bores, pins, round bosses, shafts.
     For a through hole, run it from below the part to above it.
     Example, 6 mm hole through a 10 mm plate at x=20, z=-10:

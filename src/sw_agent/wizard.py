@@ -141,7 +141,8 @@ class Wizard:
             return False
         if key and not p.local:
             keys.set_key(p.id, key)
-        entries = [ModelEntry(ch.model, ch.tools_ok, ch.latency_ms) for ch in found.checks]
+        entries = [ModelEntry(ch.model, ch.tools_ok, ch.latency_ms, note="" if ch.tools_ok else ch.detail[:160])
+                   for ch in found.checks]
         self.config.record(p.id, entries)
         self.config.save()
         table = Table(title=f"{p.name}: {found.model_count} models listed", show_lines=False)

@@ -1,10 +1,11 @@
 """The assistant loop: user message -> model (via the router) -> SolidWorks tools -> reply.
 
-Robust against weak/free models:
-- a lean tool set by default (fewer tokens per request),
+Robust against weak/free models on small free tiers (some allow only ~7000 tokens a minute):
+- a lean tool set with compact descriptions (the full ones stay on the MCP server for other apps),
 - "rescue" of tool calls the model wrote as text (JSON plan, <tool_call> blocks),
-- old tool results are shortened so the history stays small,
-- a step limit per message so a confused model cannot loop forever.
+- a compact history: earlier requests become short notes, but the user's task is always kept,
+- an identical call that already failed is not run again,
+- a step limit per message so a confused model cannot loop forever ("continue" resumes).
 """
 
 from __future__ import annotations
@@ -26,13 +27,14 @@ TRANSCRIPT_CHARS = 8000
 
 LEAN_TOOLS = (
     "get_status", "open_document", "save_document", "build_part", "get_model_summary",
-    "get_selection_context", "set_dimension", "undo_last_feature", "make_assembly", "list_project",
-    "manage_documents", "connect_parts", "move_mechanism", "make_motion_study",
+    "get_selection_context", "set_dimension", "make_assembly", "list_project",
+    "manage_documents", "make_engine", "connect_parts", "move_mechanism", "make_motion_study",
 )
-MAX_STEPS = 15
-KEEP_MESSAGES = 24          # conversation messages sent with each request (plus the system prompt)
-OLD_TOOL_RESULT_CHARS = 400  # older tool outputs are shortened to this
-TOOL_RESULT_CHARS = 6000     # the newest tool outputs are cut at this
+MAX_STEPS = 24
+OLD_TURNS = 6               # earlier requests kept (as short notes) in each request
+FULL_EXCHANGES = 2          # the newest tool calls/results of the current request are sent in full
+TOOL_RESULT_CHARS = 6000    # the newest tool outputs are cut at this
+LONG_ARGUMENT_CHARS = 240   # older tool-call arguments longer than this are replaced by a note
 
 CHAT_PREAMBLE = """You are the SolidWorks Assistant. The user is an engineer, not a programmer.
 Talk in short, plain sentences. When a request is clear, act with the tools right away.
@@ -63,8 +65,8 @@ class Toolbox:
         self._client = await self._stack.enter_async_context(Client(create_server()))
         listed = (await self._client.list_tools()).tools
         self.tools = [
-            {"type": "function", "function": {"name": t.name, "description": t.description or "",
-                                              "parameters": t.input_schema}}
+            compact_tool({"type": "function", "function": {"name": t.name, "description": t.description or "",
+                                                           "parameters": t.input_schema}})
             for t in listed if self.names is None or t.name in self.names
         ]
         return self
@@ -85,6 +87,43 @@ class Toolbox:
         result = await self._client.call_tool(name, args)
         texts = [c.text for c in result.content if getattr(c, "text", None)]
         return "\n".join(texts) or json.dumps({"ok": not result.is_error})
+
+
+def _first_sentence(text: str, limit: int = 110) -> str:
+    text = " ".join((text or "").split())
+    cut = text.find(". ")
+    text = text[:cut + 1] if 0 < cut < limit else text
+    return text if len(text) <= limit else text[:limit - 3].rstrip() + "..."
+
+
+def compact_tool(tool: dict) -> dict:
+    """The same tool with short descriptions: every request carries all tool definitions, and the
+    operating guide in the system prompt already explains the workflow."""
+    fn = tool["function"]
+    lines = [ln.strip() for ln in (fn.get("description") or "").splitlines()]
+    if fn["name"] == "build_part":  # its step syntax is essential; the guide has the example
+        kept = []
+        for ln in lines:
+            if ln.startswith("Example"):
+                break
+            if ln:
+                kept.append(ln)
+        desc = "\n".join(kept)
+    else:
+        paragraph = []
+        for ln in lines:
+            if not ln:
+                break
+            paragraph.append(ln)
+        desc = " ".join(paragraph)
+        use = next((ln for ln in lines if ln.startswith("Use when")), "")
+        if use:
+            desc += " " + use
+    params = json.loads(json.dumps(fn.get("parameters") or {}))
+    for prop in (params.get("properties") or {}).values():
+        if isinstance(prop, dict) and prop.get("description"):
+            prop["description"] = _first_sentence(prop["description"])
+    return {"type": "function", "function": {"name": fn["name"], "description": desc, "parameters": params}}
 
 
 # ------------------------------------------------------------ rescuing text-only tool calls
@@ -134,6 +173,25 @@ def parse_args(raw: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def short_result(text: str) -> str:
+    """An older tool result, reduced to what the model still needs."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text[:200]
+    if isinstance(data, dict) and data.get("ok") is False:
+        return json.dumps({k: str(data[k])[:300] for k in ("error", "message", "fix") if k in data})
+    return summarize_result(text)
+
+
+def _short_arguments(raw: str) -> str:
+    out = {}
+    for key, value in parse_args(raw).items():
+        text = value if isinstance(value, str) else json.dumps(value)
+        out[key] = value if len(text) <= LONG_ARGUMENT_CHARS else f"(sent earlier, {len(text)} characters)"
+    return json.dumps(out)
+
+
 def _num(v: Any) -> str:
     return f"{v:g}" if isinstance(v, (int, float)) else str(v)
 
@@ -149,7 +207,7 @@ def summarize_result(text: str) -> str:
     if data.get("ok") is False:
         return f"problem: {data.get('message', '')}"[:220]
     parts: list[str] = []
-    name = data.get("part") or data.get("feature") or data.get("created")
+    name = data.get("part") or data.get("feature") or data.get("created") or data.get("engine")
     if isinstance(data.get("opened"), dict):
         name = data["opened"].get("name")
     if name:
@@ -173,6 +231,10 @@ def summarize_result(text: str) -> str:
         parts.append(f"{data['selected_count']} selected")
     if isinstance(data.get("components"), list):
         parts.append(f"{len(data['components'])} parts")
+    if isinstance(data.get("parts"), dict):
+        parts.append(f"{len(data['parts'])} parts, {data.get('joints', 0)} joints")
+    if isinstance(data.get("moved"), list):
+        parts.append("moved: " + ", ".join(f"{m.get('part')} {m.get('travel_mm')} mm" for m in data["moved"][:6]))
     if data.get("check"):
         parts.append(str(data["check"]))
     if data.get("warning"):
@@ -212,18 +274,36 @@ class Assistant:
             self.transcript.write("info", "new conversation")
 
     def _window(self) -> list[dict]:
-        """System prompt + recent history, starting at a user message, with old tool output shortened."""
-        recent = self.history[-KEEP_MESSAGES:]
-        while recent and recent[0].get("role") != "user":
-            recent = recent[1:]
-        if not recent and self.history:
-            last_user = max(i for i, m in enumerate(self.history) if m.get("role") == "user")
-            recent = self.history[last_user:]
-        latest_user = max((i for i, m in enumerate(recent) if m.get("role") == "user"), default=0)
+        """System prompt + a compact history. Earlier requests become (user text, a short note of
+        what the tools did, the reply); the current request is sent in full, except that tool
+        results and long arguments older than the newest FULL_EXCHANGES exchanges are shortened."""
         out = [{"role": "system", "content": self.system}]
-        for i, msg in enumerate(recent):
-            if msg.get("role") == "tool" and i < latest_user and len(msg.get("content") or "") > OLD_TOOL_RESULT_CHARS:
-                msg = {**msg, "content": msg["content"][:OLD_TOOL_RESULT_CHARS] + " ...(shortened)"}
+        users = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
+        if not users:
+            return out
+        names = {c.get("id"): c.get("function", {}).get("name", "?")
+                 for m in self.history for c in (m.get("tool_calls") or [])}
+        starts = users[-(OLD_TURNS + 1):]
+        for a, b in zip(starts, starts[1:]):
+            turn = self.history[a:b]
+            notes, reply = [], ""
+            for msg in turn[1:]:
+                if msg.get("role") == "tool":
+                    notes.append(f"{names.get(msg.get('tool_call_id'), 'tool')}: {short_result(msg.get('content') or '')}")
+                elif msg.get("role") == "assistant" and msg.get("content") and not msg.get("tool_calls"):
+                    reply = msg["content"]
+            note = ("Tools used: " + " | ".join(notes[-8:]) + "\n") if notes else ""
+            out.append({"role": "user", "content": (turn[0].get("content") or "")[:1200]})
+            out.append({"role": "assistant", "content": (note + reply)[:2000] or "(no answer)"})
+        current = self.history[starts[-1]:]
+        exchanges = [i for i, m in enumerate(current) if m.get("role") == "assistant" and m.get("tool_calls")]
+        cutoff = exchanges[-FULL_EXCHANGES] if len(exchanges) >= FULL_EXCHANGES else (exchanges[0] if exchanges else 0)
+        for i, msg in enumerate(current):
+            if i < cutoff and msg.get("role") == "tool":
+                msg = {**msg, "content": short_result(msg.get("content") or "")}
+            elif i < cutoff and msg.get("tool_calls"):
+                msg = {**msg, "tool_calls": [{**c, "function": {**c["function"], "arguments": _short_arguments(
+                    c["function"].get("arguments") or "{}")}} for c in msg["tool_calls"]]}
             out.append(msg)
         return out
 
@@ -232,7 +312,9 @@ class Assistant:
         if self.transcript is not None:
             self.transcript.write("user", text)
         log.info("user message (%d chars)", len(text))
+        getattr(self.router, "new_turn", lambda: None)()
         tools = self.toolbox.tools
+        failed: dict[str, str] = {}  # identical calls that already failed in this request
         for _ in range(self.max_steps):
             self.on_event(Event("thinking", "thinking"))
             try:
@@ -251,7 +333,8 @@ class Assistant:
                 self.history.append({"role": "assistant", "content": reply})
                 self.on_event(Event("reply", reply))
                 return reply
-            calls = [{"id": c.get("id") or f"call_{uuid.uuid4().hex[:8]}", "type": "function",
+            calls = [{**{k: v for k, v in c.items() if k not in ("id", "type", "function", "index")},
+                      "id": c.get("id") or f"call_{uuid.uuid4().hex[:8]}", "type": "function",
                       "function": {"name": c["function"]["name"],
                                    "arguments": c["function"].get("arguments") if isinstance(
                                        c["function"].get("arguments"), str)
@@ -263,14 +346,27 @@ class Assistant:
                 if self.transcript is not None:
                     self.transcript.write("tool_call", name, arguments=json.dumps(args)[:TRANSCRIPT_CHARS])
                 self.on_event(Event("tool", name))
-                output = await self.toolbox.call(name, args)
+                key = name + json.dumps(args, sort_keys=True)
+                if key in failed:
+                    output = json.dumps({"ok": False, "error": "REPEATED_CALL",
+                                         "message": f"This exact call already failed: {failed[key]}",
+                                         "fix": "Change what the error names, or use another approach. "
+                                                "Never send the same failing call twice."})
+                else:
+                    output = await self.toolbox.call(name, args)
+                    try:
+                        data = json.loads(output)
+                    except ValueError:
+                        data = None
+                    if isinstance(data, dict) and data.get("ok") is False:
+                        failed[key] = str(data.get("message", ""))[:300]
                 if self.transcript is not None:
                     self.transcript.write("tool_output", output[:TRANSCRIPT_CHARS], tool=name)
                 self.on_event(Event("result", summarize_result(output)))
                 self.history.append({"role": "tool", "tool_call_id": call["id"],
                                      "content": output[:TOOL_RESULT_CHARS]})
-        reply = (f"I stopped after {self.max_steps} steps without finishing. Tell me how to continue, "
-                 "or ask me to check the part with get_model_summary.")
+        reply = (f"I paused after {self.max_steps} steps without finishing. Say \"continue\" and I will "
+                 "carry on from here.")
         self.history.append({"role": "assistant", "content": reply})
         self.on_event(Event("reply", reply))
         return reply

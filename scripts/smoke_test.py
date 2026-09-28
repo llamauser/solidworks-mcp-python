@@ -131,7 +131,7 @@ async def run(args) -> None:
                                    env={**os.environ, "PYTHONPATH": os.path.join(ROOT, "src"),
                                         "SW_MCP_PROJECTS": projects})
     started = time.monotonic()
-    async with Client(server, read_timeout_seconds=180) as client:
+    async with Client(server, read_timeout_seconds=900) as client:
         names = sorted(t.name for t in (await client.list_tools()).tools)
         record("server starts and lists tools", "PASS" if len(names) >= 5 else "FAIL",
                f"{time.monotonic() - started:.1f}s: {names}")
@@ -336,6 +336,20 @@ async def build_checks(client: Client, work: str) -> None:
     await step("tilted bore (45 deg) cut into a block", "build_part",
                lambda o: o.get("bodies") == 1 and 360000 - 45000 < o.get("volume_mm3", 0) < 360000 - 20000,
                plan=json.dumps(tilted))
+    tilted_x = {"steps": [block, {"op": "cylinder", "mode": "cut", "start": [0, 20, 0], "end": [0, 120, 0],
+                                  "diameter": 20, "rotate": {"axis": "x", "deg": 30, "about": [0, 20, 0]}}]}
+    await step("tilted bore about X (30 deg): the Move/Copy angle order", "build_part",
+               lambda o: o.get("bodies") == 1 and o.get("volume_mm3", 0) < 360000 - 8000, plan=json.dumps(tilted_x))
+    vtwin = {"steps": [{"op": "box", "x": [-60, 60], "y": [0, 120], "z": [-80, 80]},
+                       {"op": "cylinder", "mode": "cut", "start": [0, 30, 0], "end": [0, 130, 100], "diameter": 40},
+                       {"op": "cylinder", "mode": "cut", "start": [0, 30, 0], "end": [0, 130, -100], "diameter": 40}]}
+    await step("slanted cylinders from start/end (V-twin bores)", "build_part",
+               lambda o: o.get("bodies") == 1 and o.get("volume_mm3", 0) < 120 * 120 * 160 - 50000, plan=json.dumps(vtwin))
+    journal = {"steps": [{"op": "revolve", "axis": "x", "center": [0, 90, -45],
+                          "profile": [[0, -20], [21, -20], [21, 20], [0, 20]]}]}
+    await step("revolve with its axis off the default planes (moved into place)", "build_part",
+               lambda o: o.get("min_mm") == [-20.0, 69.0, -66.0] and o.get("max_mm") == [20.0, 111.0, -24.0],
+               plan=json.dumps(journal))
     disc = {"steps": [{"op": "revolve", "axis": "y", "profile": [[0, 0], [20, 0], [20, 10], [0, 10]]}]}
     await step("revolve a disc d40 x 10", "build_part",
                lambda o: abs(o.get("volume_mm3", 0) - 12566.4) < 130 and o.get("size_mm") == [40.0, 10.0, 40.0],
@@ -370,6 +384,15 @@ async def build_checks(client: Client, work: str) -> None:
                part="crank", degrees=180, steps=12)
     await step("mechanism: make_motion_study (rotary motor, 60 rpm, 3 s)", "make_motion_study",
                lambda o: bool(o.get("motion_study")), part="crank", rpm=60, seconds=3)
+    await step("make_engine: a small V2 (bore 50, stroke 40), built, assembled and connected", "make_engine",
+               lambda o: o.get("joints") == 7 and not o.get("warnings"),
+               project="SmokeEngine", layout="v", cylinders=2, bank_angle=90, bore=50, stroke=40)
+    await step("make_engine: turning the crankshaft moves each piston one stroke (40 mm)", "move_mechanism",
+               lambda o: sum(1 for m in o.get("moved", []) if m.get("part", "").startswith("piston")
+                             and abs(m.get("travel_mm", 0) - 40) < 1) == 2,
+               part="crankshaft", degrees=360, steps=24)
+    await step("make_engine: motion study on the crankshaft", "make_motion_study",
+               lambda o: bool(o.get("motion_study")), part="crankshaft", rpm=120, seconds=2)
     listed = await tool(client, "manage_documents", action="list")
     record("manage_documents lists the open windows", "PASS" if listed.get("ok") else "FAIL", short(listed, 300))
     closed = await tool(client, "manage_documents", action="close", name="all")
