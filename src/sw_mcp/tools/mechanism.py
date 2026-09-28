@@ -6,6 +6,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from ..core.resilience import Session, sw_tool
+from ..sw import engine as eng
 from ..sw import mechanism as mech
 
 
@@ -57,7 +58,30 @@ def make_motion_study(
     return mech.make_motion_study(sw.doc, part, rpm, seconds, kind)
 
 
+@sw_tool(needs="app", timeout=1800)
+def make_engine(
+    sw: Session,
+    project: Annotated[str, Field(description='Project (folder) name, e.g. "V4 engine". Use a new name for a new engine.')],
+    layout: Annotated[Literal["inline", "v", "boxer"], Field(description="inline, v or boxer (flat).")] = "v",
+    cylinders: Annotated[int, Field(ge=1, le=8, description="1-8; v and boxer need an even number.")] = 4,
+    bank_angle: Annotated[float, Field(ge=30, le=150, description="V angle in degrees (v only).")] = 90.0,
+    bore: Annotated[float, Field(ge=20, le=400, description="Cylinder diameter, mm.")] = 80.0,
+    stroke: Annotated[float, Field(gt=0, le=640, description="Piston travel, mm (0.4-1.6 x bore).")] = 70.0,
+    heads: Annotated[bool, Field(description="Add cylinder heads (they hide the pistons from above).")] = True,
+) -> dict:
+    """Build a complete, working piston engine: block, crankshaft, rods, pistons and heads,
+    assembled and connected so it can turn. One call; takes a few minutes in SolidWorks.
+
+    Use when: the user asks for an engine (V4, V8, inline 4, single cylinder, boxer ...).
+    Do NOT model engines with build_part: this tool gets every axis exactly right.
+    Afterwards: move_mechanism(part="crankshaft") or make_motion_study(part="crankshaft").
+    Example: make_engine(project="V4 engine", layout="v", cylinders=4, bank_angle=90)
+    """
+    return eng.build(sw.app, project, eng.design(layout, cylinders, bank_angle, bore, stroke, 0.0, heads))
+
+
 def register(mcp) -> None:
+    mcp.tool(structured_output=False, annotations=ToolAnnotations(title="Make engine"))(make_engine)
     mcp.tool(structured_output=False, annotations=ToolAnnotations(title="Connect parts"))(connect_parts)
     mcp.tool(structured_output=False, annotations=ToolAnnotations(title="Move mechanism"))(move_mechanism)
     mcp.tool(structured_output=False, annotations=ToolAnnotations(title="Motion study"))(make_motion_study)

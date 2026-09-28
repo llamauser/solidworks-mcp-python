@@ -316,39 +316,53 @@ def _joint_axis(asm: Any, comp: Any) -> CylFace:
     return best
 
 
+def _set_transform(mu: Any, comp: Any, data: list[float]) -> None:
+    comp.Transform2 = call(mu, "CreateTransform", win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8, data))
+
+
+def _stem(name: str) -> str:
+    return name.rsplit("-", 1)[0].lower()
+
+
 def move_mechanism(app: Any, doc: Any, part: str, degrees: float, steps: int) -> dict:
+    from . import engine
+
     asm = require_assembly(doc)
     comp = find_component(asm, part)
-    axis = _joint_axis(asm, comp)
-    start = comp_transform(comp)
     mu = call(app, "GetMathUtility")
     comps = {comp_name(c): c for c in components(asm)}
-    start_centers = {n: _center(comp_box(c)) for n, c in comps.items()}
-    ranges = {n: [list(p), list(p)] for n, p in start_centers.items() if p}
+    starts = {n: comp_transform(c) for n, c in comps.items()}
+    centers0 = {n: _center(comp_box(c)) for n, c in comps.items()}
+    farthest = {n: 0.0 for n, p in centers0.items() if p}
+    spec = engine.read_motion(str(try_call(asm, "GetPathName") or ""))
+    exact = spec is not None and _stem(comp_name(comp)) == spec.get("crank", "").lower()
+    by_stem = {_stem(n): n for n in comps}
+    axis = None if exact else _joint_axis(asm, comp)
     for k in range(1, steps + 1):
-        rot = rotation_about(axis.axis, degrees * k / steps, axis.origin)
-        data = compose(start, rot)
-        xf = call(mu, "CreateTransform", win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8, data))
-        comp.Transform2 = xf
-        try_call(asm, "EditRebuild3")
+        angle = degrees * k / steps
+        if exact:  # the engine's motion is known exactly: place every moving part
+            for stem, motion in engine.poses(spec, angle).items():
+                name = by_stem.get(stem.lower())
+                if name is not None:
+                    _set_transform(mu, comps[name], compose(starts[name], motion))
+        else:  # turn the part and let SolidWorks' mates move the rest
+            _set_transform(mu, comp, compose(starts[comp_name(comp)], rotation_about(axis.axis, angle, axis.origin)))
+            try_call(asm, "EditRebuild3")
         try_call(asm, "GraphicsRedraw2")
         for n, c in comps.items():
             p = _center(comp_box(c))
-            if p and n in ranges:
-                ranges[n][0] = [min(a, b) for a, b in zip(ranges[n][0], p)]
-                ranges[n][1] = [max(a, b) for a, b in zip(ranges[n][1], p)]
+            if p and n in farthest:
+                farthest[n] = max(farthest[n], math.dist(p, centers0[n]))
         time.sleep(0.02)
-    moved, still = [], []
-    for n, (lo, hi) in ranges.items():
-        span = [hi[i] - lo[i] for i in range(3)]
-        travel = max(span)
-        if travel > 0.1:
-            moved.append({"part": n, "travel_mm": round(travel, 1), "mostly_along": "xyz"[span.index(travel)]})
-        else:
-            still.append(n)
-    return {"turned": comp_name(comp), "degrees": degrees, "steps": steps,
-            "axis": {"point_mm": [round(v, 2) for v in axis.origin], "direction": [round(v, 4) for v in axis.axis]},
-            "moved": moved, "did_not_move": still}
+    moved = [{"part": n, "travel_mm": round(t, 1)} for n, t in farthest.items() if t > 0.1]
+    still = [n for n, t in farthest.items() if t <= 0.1]
+    out: dict[str, Any] = {"turned": comp_name(comp), "degrees": degrees, "steps": steps,
+                           "moved": moved, "did_not_move": still}
+    if exact:
+        out["motion"] = "exact engine motion (slider-crank): travel_mm of a piston is its stroke"
+    else:
+        out["axis"] = {"point_mm": [round(v, 2) for v in axis.origin], "direction": [round(v, 4) for v in axis.axis]}
+    return out
 
 
 def _center(box) -> list[float] | None:

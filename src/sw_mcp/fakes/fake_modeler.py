@@ -302,7 +302,7 @@ class FakeFeatureManager:
         lo[ia], lo[ib], hi[ia], hi[ib] = lo2[0], lo2[1], hi2[0], hi2[1]
         lo[n], hi[n] = s, e
         if cut:
-            if not doc.solids or not doc.intersects(lo, hi):
+            if not doc.intersects(lo, hi):
                 return None  # "the cut does not intersect the model"
         doc.feature_count += 1
         feat = FakeFeature(doc, f"{'Cut' if cut else 'Boss'}-Extrude{doc.feature_count}", "ICE" if not cut else "Cut")
@@ -449,7 +449,7 @@ class FakeFeatureManager:
                 lo[i], hi[i] = min(h for _, h in rh), max(h for _, h in rh)
             else:
                 lo[i], hi[i] = c1[i] - rmax, c1[i] + rmax
-        if is_cut and (not doc.solids or not doc.intersects(lo, hi)):
+        if is_cut and not doc.intersects(lo, hi):
             return None
         merge = rest[-3] if len(rest) >= 3 else True
         doc.feature_count += 1
@@ -563,11 +563,8 @@ class FakePart:
         return [min(v[i] for v in los) for i in range(3)], [max(v[i] for v in his) for i in range(3)]
 
     def intersects(self, lo, hi) -> bool:
-        for f in self.solids:
-            flo, fhi = f.box
-            if all(lo[i] < fhi[i] and hi[i] > flo[i] for i in range(3)):
-                return True
-        return False
+        boxes = [f.box for f in self.solids] + [b.box() for b in self.extra_bodies]
+        return any(all(lo[i] < fhi[i] and hi[i] > flo[i] for i in range(3)) for flo, fhi in boxes)
 
     def GetPartBox(self, exact: bool):
         if not self.solids:
