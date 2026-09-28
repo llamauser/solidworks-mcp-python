@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolidWorks Assistant</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --line: #e3e6eb;
+    --accent: #c8102e; --accent-soft: #fbe9ec; --user: #1d4ed8; --user-text: #ffffff;
+    --ok: #127a3e; --bad: #b42318; --warn: #a15c07; --code: #f1f3f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1a1f27; --text: #e7eaf0; --muted: #98a2b3; --line: #2b323d;
+      --accent: #ff5a6e; --accent-soft: #3a1f25; --user: #3b6fe0; --user-text: #ffffff;
+      --ok: #4ade80; --bad: #f87171; --warn: #fbbf24; --code: #232a35;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
+         display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--panel);
+           border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+  header h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  #model { color: var(--muted); font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+           white-space: nowrap; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  main { flex: 1; overflow-y: auto; padding: 20px 16px; }
+  #log { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .bubble { padding: 10px 14px; border-radius: 12px; max-width: 85%; overflow-wrap: anywhere; }
+  .user { align-self: flex-end; background: var(--user); color: var(--user-text); white-space: pre-wrap; }
+  .reply { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
+  .reply p { margin: 0 0 8px; } .reply p:last-child { margin-bottom: 0; }
+  .reply ul, .reply ol { margin: 4px 0 8px; padding-left: 22px; }
+  .reply code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  .reply pre { background: var(--code); padding: 10px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+  .step { align-self: flex-start; font-size: 13px; color: var(--muted); padding-left: 4px; }
+  .step .ok { color: var(--ok); } .step .bad { color: var(--bad); }
+  .note { align-self: center; font-size: 13px; color: var(--warn); }
+  .info { align-self: center; font-size: 13px; color: var(--muted); }
+  .error { align-self: stretch; background: var(--accent-soft); border: 1px solid var(--accent); color: var(--text);
+           padding: 10px 14px; border-radius: 10px; }
+  #thinking { align-self: flex-start; color: var(--muted); font-size: 13px; display: none; }
+  #thinking.on { display: block; }
+  #thinking::after { content: ""; animation: dots 1.2s steps(4) infinite; }
+  @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+  #welcome { max-width: 860px; margin: 8vh auto 0; text-align: center; }
+  #welcome h2 { font-size: 22px; margin: 0 0 6px; }
+  #welcome p { color: var(--muted); margin: 0 0 18px; }
+  .examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; text-align: left; }
+  .examples button { text-align: left; padding: 12px 14px; line-height: 1.4; border-radius: 10px; }
+  footer { background: var(--panel); border-top: 1px solid var(--line); padding: 12px 16px; }
+  form { max-width: 860px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  textarea { flex: 1; resize: none; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+             border-radius: 10px; padding: 10px 12px; min-height: 44px; max-height: 180px; }
+  textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { max-width: 860px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
+  #models { position: fixed; right: 16px; top: 58px; width: min(460px, calc(100vw - 32px)); background: var(--panel);
+            border: 1px solid var(--line); border-radius: 12px; padding: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.18);
+            display: none; z-index: 5; }
+  #models.open { display: block; }
+  #models table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #models td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
+  #models td:last-child { text-align: right; }
+  @media (max-width: 560px) { .bubble { max-width: 100%; } header { gap: 8px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot" aria-hidden="true"></span>SolidWorks Assistant</h1>
+  <div id="model" aria-live="polite">Starting...</div>
+  <button id="modelsBtn" type="button">Models</button>
+  <button id="newBtn" type="button">New conversation</button>
+</header>
+<div id="models" role="dialog" aria-label="AI models">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <strong>AI models (tried top to bottom)</strong>
+    <button type="button" id="autoBtn">Automatic</button>
+  </div>
+  <table id="modelsTable"></table>
+</div>
+<main id="scroll">
+  <div id="welcome">
+    <h2>What should we build?</h2>
+    <p>Describe a part in plain words. Sizes in millimeters. You can also click something in SolidWorks and ask to change it.</p>
+    <div class="examples">
+      <button type="button">Make a 100 x 60 x 12 mm base plate with rounded corners (R8) and four 8 mm holes 10 mm in from each side.</button>
+      <button type="button">Make a round flange: 90 mm diameter, 10 mm thick, a 30 mm center bore and 6 holes of 8 mm on a 70 mm bolt circle.</button>
+      <button type="button">Make an L-bracket: base 80 x 40 x 6 mm, a 6 mm wall 50 mm tall on one long edge, two 6.5 mm holes in the base.</button>
+      <button type="button">I clicked a face in SolidWorks. Make it 3 mm thicker.</button>
+    </div>
+  </div>
+  <div id="log" aria-live="polite"></div>
+</main>
+<footer>
+  <form id="form">
+    <label for="input" style="position:absolute;left:-9999px">Message</label>
+    <textarea id="input" rows="1" placeholder="Describe what you want..." autocomplete="off"></textarea>
+    <button class="primary" id="sendBtn" type="submit">Send</button>
+  </form>
+  <div class="hint">Enter to send, Shift+Enter for a new line. Everything runs on this PC; only your messages go to the AI provider.</div>
+</footer>
+<script>
+const TOKEN = "__TOKEN__";
+const $ = (id) => document.getElementById(id);
+const log = $("log"), input = $("input"), sendBtn = $("sendBtn"), scroller = $("scroll");
+let lastId = 0, busy = false, thinking = null;
+
+const TOOL_LABELS = {
+  build_part: "Building the part", get_status: "Checking SolidWorks", open_document: "Opening the file",
+  save_document: "Saving", make_assembly: "Putting the assembly together", list_project: "Looking at the project",
+  get_selection_context: "Reading what you selected", set_dimension: "Changing a dimension",
+  get_model_summary: "Checking the result", undo_last_feature: "Undoing the last step",
+};
+
+async function api(path, body) {
+  const opts = { headers: { "X-Token": TOKEN, "Content-Type": "application/json" } };
+  if (body !== undefined) { opts.method = "POST"; opts.body = JSON.stringify(body); }
+  const res = await fetch(path, opts);
+  return { status: res.status, data: await res.json().catch(() => ({})) };
+}
+
+function esc(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function markdown(src) {
+  const blocks = [];
+  let text = esc(src).replace(/```[a-z]*\n?([\s\S]*?)```/g, (_, code) => {
+    blocks.push(`<pre>${code}</pre>`); return `\u0000${blocks.length - 1}\u0000`;
+  });
+  const inline = (s) => s.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const out = [];
+  for (const para of text.split(/\n{2,}/)) {
+    const lines = para.split("\n");
+    if (lines.every((l) => /^\s*[-*] /.test(l))) {
+      out.push("<ul>" + lines.map((l) => `<li>${inline(l.replace(/^\s*[-*] /, ""))}</li>`).join("") + "</ul>");
+    } else if (lines.every((l) => /^\s*\d+[.)] /.test(l))) {
+      out.push("<ol>" + lines.map((l) => `<li>${inline(l.replace(/^\s*\d+[.)] /, ""))}</li>`).join("") + "</ol>");
+    } else {
+      out.push(`<p>${inline(lines.join("<br>"))}</p>`);
+    }
+  }
+  return out.join("").replace(/\u0000(\d+)\u0000/g, (_, i) => blocks[+i]);
+}
+
+function add(cls, html) {
+  $("welcome").style.display = "none";
+  const el = document.createElement("div");
+  el.className = cls; el.innerHTML = html;
+  log.appendChild(el);
+  scroller.scrollTop = scroller.scrollHeight;
+  return el;
+}
+
+function setThinking(on) {
+  if (on && !thinking) { thinking = add("", "Thinking"); thinking.id = "thinking"; thinking.className = "on"; }
+  if (!on && thinking) { thinking.remove(); thinking = null; }
+}
+
+function render(e) {
+  switch (e.kind) {
+    case "user": add("bubble user", esc(e.text)); break;
+    case "thinking": setThinking(true); break;
+    case "tool": setThinking(false); add("step", "&#8594; " + esc(TOOL_LABELS[e.text] || e.text) + "..."); break;
+    case "result": {
+      const bad = e.text.startsWith("problem");
+      add("step", `<span class="${bad ? "bad" : "ok"}">${bad ? "&#10007;" : "&#10003;"}</span> ${esc(e.text.replace(/^(done: |problem: )/, ""))}`);
+      break;
+    }
+    case "model": add("note", esc(e.text)); break;
+    case "error": setThinking(false); add("error", esc(e.text)); break;
+    case "reply": setThinking(false); add("bubble reply", markdown(e.text)); break;
+    case "info": add("info", esc(e.text)); break;
+    case "idle": setThinking(false); setBusy(false); refreshStatus(); break;
+  }
+}
+
+function setBusy(b) {
+  busy = b; sendBtn.disabled = b; $("newBtn").disabled = b;
+  sendBtn.textContent = b ? "Working..." : "Send";
+}
+
+async function poll() {
+  for (;;) {
+    try {
+      const { data } = await api(`/api/events?after=${lastId}`);
+      for (const e of data.events || []) { lastId = Math.max(lastId, e.id); render(e); }
+      if (typeof data.busy === "boolean" && !data.busy && busy) setBusy(false);
+    } catch (err) {
+      add("error", "Lost the connection to the assistant. Is its window still open?");
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+}
+
+async function refreshStatus() {
+  const { data } = await api("/api/status");
+  const models = data.models || [];
+  const ready = models.find((m) => m.state === "pinned" || m.state === "ready");
+  $("model").textContent = ready ? `Model: ${ready.provider} / ${ready.model}` : (models.length ? "All models are busy right now" : "No AI model connected");
+  $("modelsTable").innerHTML = models.map((m) =>
+    `<tr><td>${m.n}</td><td>${esc(m.provider)}<br><small>${esc(m.model)}</small></td><td>${esc(m.state)}</td>` +
+    `<td><button type="button" data-n="${m.n}">Use first</button></td></tr>`).join("") ||
+    "<tr><td>No models yet. Run the installer or 'sw-agent setup'.</td></tr>";
+}
+
+async function send(text) {
+  text = text.trim();
+  if (!text || busy) return;
+  setBusy(true);
+  input.value = ""; input.style.height = "";
+  const { status } = await api("/api/send", { text });
+  if (status !== 200) { setBusy(false); add("error", status === 409 ? "Still working on the last request." : "Could not send that."); }
+}
+
+$("form").addEventListener("submit", (ev) => { ev.preventDefault(); send(input.value); });
+input.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); send(input.value); } });
+input.addEventListener("input", () => { input.style.height = ""; input.style.height = Math.min(input.scrollHeight, 180) + "px"; });
+document.querySelectorAll(".examples button").forEach((b) => b.addEventListener("click", () => send(b.textContent)));
+$("newBtn").addEventListener("click", () => api("/api/control", { action: "new" }));
+$("modelsBtn").addEventListener("click", () => { $("models").classList.toggle("open"); refreshStatus(); });
+$("autoBtn").addEventListener("click", async () => { await api("/api/control", { action: "auto" }); refreshStatus(); });
+$("modelsTable").addEventListener("click", async (ev) => {
+  const n = ev.target.dataset && ev.target.dataset.n;
+  if (n) { await api("/api/control", { action: "use", n: +n }); refreshStatus(); }
+});
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") $("models").classList.remove("open"); });
+
+refreshStatus();
+poll();
+input.focus();
+</script>
+</body>
+</html>

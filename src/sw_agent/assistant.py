@@ -129,8 +129,12 @@ def parse_args(raw: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _num(v: Any) -> str:
+    return f"{v:g}" if isinstance(v, (int, float)) else str(v)
+
+
 def summarize_result(text: str) -> str:
-    """One line for the screen."""
+    """One plain-language line for the screen, e.g. 'Part1: 100 x 12 x 60 mm, 6 features, matches the plan'."""
     try:
         data = json.loads(text)
     except ValueError:
@@ -139,17 +143,36 @@ def summarize_result(text: str) -> str:
         return text[:160]
     if data.get("ok") is False:
         return f"problem: {data.get('message', '')}"[:220]
-    parts = []
-    for key in ("feature", "part", "created", "opened", "saved", "saved_as", "exported", "assembly", "dimension",
-                "size_mm", "features", "check", "selected_count", "version"):
-        if key in data:
-            value = data[key]
-            if isinstance(value, dict):
-                value = value.get("name", value)
-            if isinstance(value, list) and len(value) > 6:
-                value = f"{len(value)} items"
-            parts.append(f"{key} {value}")
-    return ("done: " + ", ".join(parts))[:220] if parts else "done"
+    parts: list[str] = []
+    name = data.get("part") or data.get("feature") or data.get("created")
+    if isinstance(data.get("opened"), dict):
+        name = data["opened"].get("name")
+    if name:
+        parts.append(str(name))
+    if isinstance(data.get("size_mm"), list):
+        parts.append(" x ".join(_num(v) for v in data["size_mm"]) + " mm")
+    features = data.get("features")
+    if isinstance(features, int):
+        parts.append(f"{features} features")
+    elif isinstance(features, list) and features and isinstance(features[0], str):
+        parts.append(f"{len(features)} copies")
+    if "dimension" in data:
+        parts.append(f"{data['dimension']}: {_num(data.get('old'))} -> {_num(data.get('new'))} {data.get('unit', '')}".strip())
+    for key, label in (("saved_as", "saved to"), ("saved", "saved to"), ("exported", "exported to"),
+                       ("assembly", "assembly saved to")):
+        if data.get(key):
+            parts.append(f"{label} {data[key]}")
+    if "version" in data:
+        parts.append(f"SolidWorks {data['version']}")
+    if "selected_count" in data:
+        parts.append(f"{data['selected_count']} selected")
+    if isinstance(data.get("components"), list):
+        parts.append(f"{len(data['components'])} parts")
+    if data.get("check"):
+        parts.append(str(data["check"]))
+    if data.get("warning"):
+        parts.append(f"note: {data['warning']}")
+    return ("done: " + ", ".join(parts))[:260] if parts else "done"
 
 
 # ------------------------------------------------------------ the loop

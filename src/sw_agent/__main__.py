@@ -4,6 +4,8 @@
   sw-agent status    show connected providers and working models
   sw-agent connect   use the SolidWorks tools from other apps (VS Code, Claude Desktop, ...)
   sw-agent sync      regenerate the per-app instruction files from src/sw_mcp/guide.md
+  sw-agent web       the assistant in your browser
+  sw-agent           the assistant in this terminal (same as `sw-agent chat`)
 """
 
 from __future__ import annotations
@@ -100,6 +102,12 @@ def cmd_bench(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_web(args: argparse.Namespace) -> int:
+    from .web import main as web_main
+
+    return web_main(open_browser=not args.no_browser, port=args.port)
+
+
 def cmd_chat(_: argparse.Namespace) -> int:
     from .chat import main as chat_main
 
@@ -117,9 +125,13 @@ def main(argv: list[str] | None = None) -> int:
         ("sync", cmd_sync, "regenerate per-app instruction files"),
         ("chat", cmd_chat, "start the assistant"),
         ("bench", cmd_bench, "score connected models on SolidWorks tasks"),
+        ("web", cmd_web, "open the assistant in your browser"),
     ):
         p = sub.add_parser(name, help=text)
         p.set_defaults(func=fn)
+        if name == "web":
+            p.add_argument("--port", type=int, default=None)
+            p.add_argument("--no-browser", action="store_true")
         if name == "bench":
             p.add_argument("--models", type=int, default=3, help="how many models to score (best first)")
             p.add_argument("--yes", action="store_true", help="do not ask for confirmation")

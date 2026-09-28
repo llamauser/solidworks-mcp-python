@@ -28,7 +28,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 sw_mcp = ["guide.md"]
-sw_agent = ["providers.toml"]
+sw_agent = ["providers.toml", "web.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

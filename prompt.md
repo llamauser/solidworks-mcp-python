@@ -220,7 +220,20 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - **Guide:** now has round parts, tilted features and a MACHINES workflow. The build_part docstring covers revolve and rotate.
   - **Fakes:** separate bodies, move/copy (knob `rotation_sign`), combine, revolve (Pappus), assemblies (knob `component_offset`), SaveAs.
   - 145 tests pass.
-- [ ] P6 next: browser UI (`sw-agent web`), one-click installer .bat + desktop shortcut, simple docs (docs/GETTING_STARTED.md).
+- [x] **P6 done:**
+  - **`sw-agent web`** (`src/sw_agent/web.py` + `web.html`): Starlette/uvicorn on 127.0.0.1 (port 8777 or a free one). The page gets a per-session token, and the API requires the `X-Token` header.
+    - Endpoints: `/api/send`, `/api/events?after=N` (long-poll 20 s, `wait=0` for tests), `/api/status`, `/api/control` {new|use|auto}.
+    - The page: chat, friendly tool labels, progress lines, examples, a models popover, light/dark themes.
+    - Checked visually in the browser pane with a scripted model + fake SolidWorks (scratchpad `web_demo.py`); the round trip works, with no overflow at 375 px.
+  - `summarize_result` now prints plain language, e.g. "Part1, 100 x 12 x 60 mm, 6 features, matches the plan".
+  - **One-click files:** `Install SolidWorks Assistant.bat` (runs install.ps1) and `SolidWorks Assistant.bat` (starts `sw_agent web`). `.gitattributes` keeps .bat/.ps1 CRLF. install.ps1 gained `-Quiet` plus a desktop-shortcut prompt.
+  - `docs/GETTING_STARTED.md` for non-coders; the README links to it.
+  - 149 tests pass.
+
+**ALL PHASES (P1–P6) BUILT. NEXT: the user tests on the SolidWorks PC.**
+1. `git pull`, then double-click `Install SolidWorks Assistant.bat` (connect providers, create the shortcut).
+2. `.venv\Scripts\python scripts\smoke_test.py` and send the report. Phase 5 real-SW calls are unverified: InsertMoveCopyBody2, InsertCombineFeature, FeatureRevolve2 + CreateCenterLine, AddComponent5 placement.
+3. `sw-agent bench`, then the desktop shortcut (browser UI) with prompts B1–B6.
 
 **Plan:**
 - **P1 Plan-as-data:** the LLM writes the whole part as one JSON plan (the existing primitives). The server validates it with pydantic and executes it deterministically with verification, with a repair loop on errors. This takes about 2–5 LLM requests per part instead of about 30, and makes weak or free models viable. It lives in sw_mcp, so all clients benefit.

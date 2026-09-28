@@ -9,6 +9,10 @@ It works with any recent SolidWorks (about 2020 onward) and with localized (non-
 installs. It comes with `sw-agent`, which connects free AI providers (setup wizard) and
 links the tools to OpenCode, VS Code Copilot, Gemini CLI, Claude Desktop and other MCP apps.
 
+> **SolidWorks users (no coding needed):** read [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
+> In short: double-click **Install SolidWorks Assistant.bat**, connect a free AI provider when
+> asked, then double-click **SolidWorks Assistant** to open it in your browser.
+
 ## Setup on the SolidWorks PC
 
 1. Get the project: `git clone https://github.com/llamauser/solidworks-mcp-python.git`, then open
@@ -17,8 +21,9 @@ links the tools to OpenCode, VS Code Copilot, Gemini CLI, Claude Desktop and oth
    powershell -ExecutionPolicy Bypass -File .\install.ps1
    ```
    It installs Python if needed (via winget, after asking), creates `.venv`, installs everything,
-   runs the unit tests, and starts the **AI provider wizard** (below). It is safe to run again
-   after every `git pull`.
+   runs the unit tests, starts the **AI provider wizard** (below) and offers a desktop shortcut.
+   It is safe to run again after every `git pull`. (`Install SolidWorks Assistant.bat` does the
+   same with a double-click; `-Quiet` skips all questions.)
 2. Check SolidWorks works end to end. This starts SolidWorks if needed, edits a test block,
    then builds parts from scratch (holes, pockets, repeats, a flange from one plan), checking
    every step, all in a temp folder:
@@ -43,6 +48,17 @@ your own PC. For each one it:
 Connect several: when one provider hits its daily limit, the assistant can use another.
 `sw-agent status` shows what is connected. The provider list is `src/sw_agent/providers.toml`;
 free offers change often, and updating that file needs no code change.
+
+## The assistant
+
+- **Browser:** `sw-agent web`, or double-click `SolidWorks Assistant.bat`. It is a local page
+  (127.0.0.1 only, protected by a per-session token) with the chat, live progress, model
+  switching and examples.
+- **Terminal:** `sw-agent`. Type `/help` for its commands.
+- **Model choice:** both try the connected models best-first and switch automatically when one
+  is rate-limited or failing.
+- **Benchmark:** `sw-agent bench` scores your connected models on three SolidWorks tasks
+  against a fake SolidWorks (no SolidWorks needed), so the best ones are tried first.
 
 ## Using it from other AI apps
 

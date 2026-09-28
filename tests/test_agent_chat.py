@@ -130,7 +130,7 @@ def test_rescue_hermes_style_tool_call():
 def test_parse_args_and_summary():
     assert parse_args('{"a": 1}') == {"a": 1} and parse_args("nonsense") == {} and parse_args({"b": 2}) == {"b": 2}
     assert summarize_result('{"ok": false, "message": "No document"}').startswith("problem")
-    assert "size_mm [60, 10, 40]" in summarize_result('{"ok": true, "size_mm": [60, 10, 40]}')
+    assert "60 x 10 x 40 mm" in summarize_result('{"ok": true, "size_mm": [60, 10, 40]}')
 
 
 # ---------------------------------------------------------------- full loop against the fake SolidWorks
