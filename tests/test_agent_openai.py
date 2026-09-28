@@ -35,16 +35,24 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def sent_payloads(model: str) -> dict:
+RESPONSE_WITH_CALL = {"status": "completed", "usage": {"input_tokens": 1200, "output_tokens": 80}, "output": [
+    {"type": "reasoning", "id": "rs_1", "summary": []},
+    {"type": "message", "content": [{"type": "output_text", "text": "Building it."}]},
+    {"type": "function_call", "id": "fc_1", "call_id": "call_abc", "name": "build_part",
+     "arguments": "{\"plan\": \"{}\"}"}]}
+
+
+def openai_call(model: str, messages=None, tools=None, answer=None):
     sent = []
 
     def handler(request):
-        sent.append(json.loads(request.content))
-        return httpx.Response(200, json={"choices": [{"message": {"content": "hi"}}]})
+        sent.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json=answer or {"output": [
+            {"type": "message", "content": [{"type": "output_text", "text": "hi"}]}]})
 
     client = ChatClient(OPENAI, "k", http=httpx.Client(transport=httpx.MockTransport(handler)))
-    client.chat(model, [{"role": "user", "content": "x"}], max_tokens=300)
-    return sent[0]
+    result = client.chat(model, messages or [{"role": "user", "content": "x"}], tools=tools, max_tokens=300)
+    return sent[0][0], sent[0][1], result
 
 
 # ---------------------------------------------------------------- provider
@@ -53,11 +61,66 @@ def test_openai_is_a_paid_provider_with_its_key_page():
     assert OPENAI.key_url.startswith("https://platform.openai.com/")
 
 
-def test_reasoning_models_get_their_own_parameters():
-    new = sent_payloads("gpt-5-mini")
-    assert "temperature" not in new and "max_tokens" not in new and new["max_completion_tokens"] >= 8000
-    old = sent_payloads("gpt-4.1-mini")
-    assert old["temperature"] == 0.1 and old["max_completion_tokens"] == 300
+def test_openai_uses_the_responses_api_with_its_own_parameters():
+    """Log 2026-09-28 15:29: gpt-5.6 models refuse function tools on /chat/completions."""
+    path, new, _ = openai_call("gpt-5.6-terra")
+    assert path == "/v1/responses" and "temperature" not in new and new["max_output_tokens"] >= 8000
+    assert new["store"] is False
+    _, old, _ = openai_call("gpt-4.1-mini")
+    assert old["temperature"] == 0.1 and old["max_output_tokens"] == 300
+
+
+def test_conversation_and_tools_are_translated_both_ways():
+    tool = {"type": "function", "function": {"name": "build_part", "description": "Build.",
+                                             "parameters": {"type": "object", "properties": {"plan": {"type": "string"}}}}}
+    history = [{"role": "system", "content": "You are a CAD operator."},
+               {"role": "user", "content": "plate"},
+               {"role": "assistant", "content": None, "tool_calls": [
+                   {"id": "call_1", "type": "function", "function": {"name": "get_status", "arguments": "{}"}}]},
+               {"role": "tool", "tool_call_id": "call_1", "content": "{\"ok\":true}"},
+               {"role": "assistant", "content": "Ready."},
+               {"role": "user", "content": "go"}]
+    _, sent, result = openai_call("gpt-5-mini", history, [tool], RESPONSE_WITH_CALL)
+    assert sent["instructions"] == "You are a CAD operator."
+    assert sent["input"] == [
+        {"role": "user", "content": "plate"},
+        {"type": "function_call", "call_id": "call_1", "name": "get_status", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "call_1", "output": "{\"ok\":true}"},
+        {"role": "assistant", "content": "Ready."},
+        {"role": "user", "content": "go"}]
+    assert sent["tools"] == [{"type": "function", "name": "build_part", "description": "Build.",
+                              "parameters": tool["function"]["parameters"], "strict": False}]
+    assert result.content == "Building it." and result.usage == {"prompt_tokens": 1200, "completion_tokens": 80}
+    assert result.tool_calls == [{"id": "call_abc", "type": "function",
+                                  "function": {"name": "build_part", "arguments": "{\"plan\": \"{}\"}"}}]
+
+
+def test_an_empty_openai_answer_is_an_error():
+    with pytest.raises(LLMError) as info:
+        openai_call("gpt-5-mini", answer={"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"},
+                                          "output": [{"type": "reasoning", "summary": []}]})
+    assert info.value.kind == "bad_output" and "max_output_tokens" in str(info.value)
+
+
+def test_no_credit_is_explained_and_the_provider_is_set_aside():
+    from sw_agent.llm import _classify
+    from sw_agent.router import NoModelAvailable
+
+    err = _classify(httpx.Response(429, json={"error": {"message": "You have no credits remaining. Add credits to "
+                                                                   "continue using the API."}}))
+    assert err.kind == "no_credit"
+    openai = Scripted([err])
+    groq = Scripted([text("from groq")])
+    router, events = make_router(config_with(("groq", "g", None, 100)), {"openai": openai, "groq": groq})
+    router.pin("openai", "gpt-5")
+    assert router.chat([{"role": "user", "content": "hi"}])[0].content == "from groq"
+    assert any("no credit" in e and "Billing" in e for e in events)
+    assert all(c.provider.id != "openai" for c in router.candidates())
+    router2, _ = make_router(config_with(), {"openai": Scripted([LLMError("bad_request", "Model refused tools", 400)])})
+    router2.pin("openai", "gpt-5.6-sol", only=True)
+    with pytest.raises(NoModelAvailable) as info:
+        router2.chat([{"role": "user", "content": "hi"}])
+    assert "The model you chose did not answer" in str(info.value) and "Model refused tools" in str(info.value)
 
 
 def test_openai_model_list_keeps_chat_models_only():

@@ -31,6 +31,7 @@ class Provider:
     model_exclude: tuple[str, ...] = field(default_factory=tuple)  # ids containing these are not chat models
     max_tokens_param: str = "max_tokens"             # OpenAI's newer models want max_completion_tokens
     reasoning_models: tuple[str, ...] = field(default_factory=tuple)  # id prefixes: no temperature, more tokens
+    api: str = "chat"                                # "chat" (/chat/completions) or "responses" (OpenAI /responses)
 
     @property
     def privacy_label(self) -> str:

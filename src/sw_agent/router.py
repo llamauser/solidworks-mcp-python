@@ -158,6 +158,12 @@ class Router:
             self.on_event(f"{c.provider.name}: the key was refused, not using it this session "
                           "(run 'sw-agent setup' to fix it).")
             return
+        if err.kind == "no_credit":
+            self._disabled.add(pid)
+            self.on_event(f"{c.provider.name}: your account has no credit left. Add credit on the provider's "
+                          "billing page (for OpenAI: platform.openai.com > Settings > Billing), then start again. "
+                          "Using the other models meanwhile.")
+            return
         if err.token_limit:
             self._token_cap[(pid, c.model)] = err.token_limit
         if err.kind == "too_large":
@@ -185,6 +191,7 @@ class Router:
         size = int((len(json.dumps(messages)) + len(json.dumps(tools or []))) / CHARS_PER_TOKEN)
         soonest = None
         too_big = []
+        last_error = ""
         for c in candidates:
             cap = self._token_cap.get((c.provider.id, c.model))
             if cap and size > cap * 0.95:
@@ -202,6 +209,7 @@ class Router:
             except LLMError as err:
                 log.warning("%s failed: %s (%s)", c.label, err.kind, str(err)[:300])
                 self._penalize(c, err)
+                last_error = f"{c.label}: {str(err)[:300]}"
                 continue
             usage = result.usage or {}
             log.info("%s answered in %d ms (tokens in %s, out %s, tool calls %d)", c.label, result.latency_ms,
@@ -220,8 +228,12 @@ class Router:
         if soonest is not None:
             raise NoModelAvailable(f"All connected models are busy or rate-limited. Try again in about "
                                    f"{soonest:.0f} s, or connect more providers with 'sw-agent setup'.")
+        detail = f" Last error from {last_error}" if last_error else ""
+        if self.pinned and self.only:
+            raise NoModelAvailable(f"The model you chose did not answer.{detail} Choose another model under "
+                                   "Models, or untick 'Only this model'.")
         raise NoModelAvailable("Every connected model failed just now. Try again in a minute, or run "
-                               "'sw-agent setup' to test your providers.")
+                               f"'sw-agent setup' to test your providers.{detail}")
 
     # ------------------------------------------------------------ reporting
     def status(self) -> list[tuple[str, str, str]]:
