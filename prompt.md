@@ -237,6 +237,12 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - Before this commit, sw-agent chat/web sessions were NOT logged to a file (only OpenCode/VS Code/smoke-test runs of `python -m sw_mcp` were).
   - 151 tests pass.
 
+- [x] **Double-click everything** (the user could not run the smoke test through the venv):
+  - `SolidWorks Assistant - Tools.bat` is a menu: web, chat, check, logs, setup, status, bench, update (git pull + install -Quiet). It auto-installs if .venv is missing.
+  - `Check SolidWorks.bat` and `sw-agent check [--part] [--no-open]` run scripts/smoke_test.py with the venv python, then collect the logs.
+  - `sw-agent logs` now opens Explorer with the zip selected (`explorer /select,`) and copies the path (`clip`).
+  - install.ps1 creates two desktop shortcuts (the assistant + Tools). All .bat files are CRLF.
+
 **ALL PHASES (P1–P6) BUILT. NEXT: the user tests on the SolidWorks PC.**
 1. `git pull`, then double-click `Install SolidWorks Assistant.bat` (connect providers, create the shortcut).
 2. `.venv\Scripts\python scripts\smoke_test.py` and send the report. Phase 5 real-SW calls are unverified: InsertMoveCopyBody2, InsertCombineFeature, FeatureRevolve2 + CreateCenterLine, AddComponent5 placement.

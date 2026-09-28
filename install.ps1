@@ -45,24 +45,26 @@ if (-not ($SkipProviders -or $Quiet)) {
 }
 
 if (-not $Quiet) {
-    $answer = Read-Host "Create a desktop shortcut 'SolidWorks Assistant'? [Y/n]"
+    $answer = Read-Host "Create desktop shortcuts 'SolidWorks Assistant' and 'SolidWorks Assistant - Tools'? [Y/n]"
     if ($answer -eq "" -or $answer -match "^[Yy]") {
         $desktop = [Environment]::GetFolderPath("Desktop")
         $shell = New-Object -ComObject WScript.Shell
-        $link = $shell.CreateShortcut((Join-Path $desktop "SolidWorks Assistant.lnk"))
-        $link.TargetPath = Join-Path $root "SolidWorks Assistant.bat"
-        $link.WorkingDirectory = $root
-        $link.Description = "Build and edit SolidWorks parts by describing them"
-        $link.Save()
-        Write-Host "Shortcut created on your desktop."
+        foreach ($item in @(
+            @("SolidWorks Assistant", "SolidWorks Assistant.bat", "Build and edit SolidWorks parts by describing them"),
+            @("SolidWorks Assistant - Tools", "SolidWorks Assistant - Tools.bat", "Check SolidWorks, collect logs, AI providers, update")
+        )) {
+            $link = $shell.CreateShortcut((Join-Path $desktop ($item[0] + ".lnk")))
+            $link.TargetPath = Join-Path $root $item[1]
+            $link.WorkingDirectory = $root
+            $link.Description = $item[2]
+            $link.Save()
+        }
+        Write-Host "Shortcuts created on your desktop."
     }
 }
 
 Write-Host ""
 Write-Host "Done. Next steps:" -ForegroundColor Green
-Write-Host "  - Start the assistant:         double-click 'SolidWorks Assistant' (desktop or this folder)"
-Write-Host "  - Check SolidWorks works:      .venv\Scripts\python scripts\smoke_test.py"
-Write-Host "  - See your AI providers:       .venv\Scripts\sw-agent status"
-Write-Host "  - Add more providers later:    .venv\Scripts\sw-agent setup"
-Write-Host "  - Use it from OpenCode, VS Code Copilot, Gemini CLI or Claude Desktop:"
-Write-Host "                                 .venv\Scripts\sw-agent connect"
+Write-Host "  - Start the assistant:   double-click 'SolidWorks Assistant'"
+Write-Host "  - Everything else:       double-click 'SolidWorks Assistant - Tools'"
+Write-Host "                           (check SolidWorks, collect logs, AI providers, update)"

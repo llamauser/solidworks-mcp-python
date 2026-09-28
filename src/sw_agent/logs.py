@@ -76,6 +76,20 @@ class Transcript:
             pass
 
 
+def reveal(path: Path) -> None:
+    """Open File Explorer with the file selected, and copy its path to the clipboard."""
+    import subprocess
+
+    try:
+        subprocess.Popen(["explorer", "/select,", str(path)])
+    except OSError:
+        pass
+    try:
+        subprocess.run(["clip"], input=str(path), text=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def collect(dest_folder: Path | None = None, max_conversations: int = 20) -> Path:
     """Zip everything useful for a bug report. Returns the zip path."""
     desktop = Path(os.path.expanduser("~")) / "Desktop"

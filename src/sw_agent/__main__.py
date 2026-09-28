@@ -6,6 +6,7 @@
   sw-agent sync      regenerate the per-app instruction files from src/sw_mcp/guide.md
   sw-agent web       the assistant in your browser
   sw-agent logs      zip the logs onto the Desktop to send to the developer
+  sw-agent check     SolidWorks end-to-end check (the smoke test), then zip the logs
   sw-agent           the assistant in this terminal (same as `sw-agent chat`)
 """
 
@@ -35,16 +36,40 @@ def cmd_setup(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_logs(_: argparse.Namespace) -> int:
-    from .logs import collect, log_dir
+def _hand_over_logs(console: Console, open_explorer: bool = True) -> None:
+    from .logs import collect, log_dir, reveal
 
     path = collect()
-    console = Console()
-    console.print(f"[green]Saved:[/green] {path}")
-    console.print("Send this file to the developer. It has the logs, your recent conversations and the "
-                  "provider test results. It does NOT contain your API keys.")
-    console.print(f"[dim]The raw logs are in {log_dir()}[/dim]")
+    console.print(f"\n[bold green]Logs saved:[/bold green] {path}")
+    if open_explorer:
+        reveal(path)
+        console.print("A File Explorer window opened with the zip selected (its path is also copied).")
+        console.print("Drag that zip into the chat with the developer.")
+    console.print("It has the logs, your recent conversations and the test results. It does NOT contain "
+                  "your API keys.")
+    console.print(f"[dim]Raw logs folder: {log_dir()}[/dim]")
+
+
+def cmd_logs(args: argparse.Namespace) -> int:
+    _hand_over_logs(Console(), open_explorer=not getattr(args, "no_open", False))
     return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """Run the SolidWorks end-to-end check (scripts/smoke_test.py), then pack the logs."""
+    import subprocess
+
+    console = Console()
+    script = ROOT / "scripts" / "smoke_test.py"
+    if not script.exists():
+        console.print(f"[red]Cannot find {script}.[/red] Re-download the project.")
+        return 1
+    console.print("[bold]Checking SolidWorks[/bold] (it starts SolidWorks if needed and builds test parts "
+                  "in a temp folder; your files are not touched). This takes 1-3 minutes.\n")
+    cmd = [sys.executable, str(script)] + (["--part", args.part] if args.part else [])
+    code = subprocess.call(cmd, cwd=str(ROOT))
+    _hand_over_logs(console, open_explorer=not args.no_open)
+    return code
 
 
 def cmd_status(_: argparse.Namespace) -> int:
@@ -145,9 +170,14 @@ def main(argv: list[str] | None = None) -> int:
         ("bench", cmd_bench, "score connected models on SolidWorks tasks"),
         ("web", cmd_web, "open the assistant in your browser"),
         ("logs", cmd_logs, "collect logs into a zip on the Desktop (no keys)"),
+        ("check", cmd_check, "check SolidWorks end to end, then collect the logs"),
     ):
         p = sub.add_parser(name, help=text)
         p.set_defaults(func=fn)
+        if name in ("logs", "check"):
+            p.add_argument("--no-open", action="store_true", help="do not open File Explorer")
+        if name == "check":
+            p.add_argument("--part", default=None, help="test with a copy of this part instead of a test block")
         if name == "web":
             p.add_argument("--port", type=int, default=None)
             p.add_argument("--no-browser", action="store_true")

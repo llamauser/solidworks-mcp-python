@@ -29,7 +29,8 @@ A black window opens and:
 1. installs Python if it is missing (it asks first);
 2. installs the assistant;
 3. starts the **AI provider setup**, described next;
-4. offers to put a **SolidWorks Assistant** shortcut on your desktop.
+4. offers two desktop shortcuts: **SolidWorks Assistant** (to use it) and
+   **SolidWorks Assistant - Tools** (everything else, see below).
 
 ### Connecting AI providers
 
@@ -79,6 +80,22 @@ If the result is not right, just say what to change: "the holes should be 8 mm, 
 - **Models:** see which AI models are connected. Choose one to try first, or go back to
   automatic.
 
+## The Tools menu
+
+Double-click **SolidWorks Assistant - Tools** (on the desktop, or in the folder). It opens a
+menu: type a number and press Enter. No commands to remember.
+
+| Number | What it does |
+|--------|--------------|
+| 1 / 2 | Start the assistant in your browser, or in the menu window |
+| 3 | **Check SolidWorks works.** It builds a few test parts in a temp folder (your files are not touched), then packs the logs. Takes 1 to 3 minutes. |
+| 4 | **Collect all logs.** It makes one zip on your Desktop, opens a window with it selected, and copies its path. Drag that zip into the chat with the developer. |
+| 5 / 6 | Connect or change AI providers, or see which ones are connected |
+| 7 | Score the AI models on SolidWorks tasks (uses some free requests) |
+| 8 | Update to the latest version (needs Git; otherwise download the ZIP again) |
+
+If the assistant is not installed yet, the menu installs it first.
+
 ## If something goes wrong
 
 | You see | What to do |
@@ -88,10 +105,11 @@ If the result is not right, just say what to change: "the holes should be 8 mm, 
 | "SolidWorks is starting" | Wait 30 seconds and ask again. |
 | "SolidWorks is busy" or no answer | Look at SolidWorks: close any open dialog box, then try again. |
 | The page says it lost the connection | The black window was closed. Double-click **SolidWorks Assistant** again. |
-| Anything else | Close everything and start again. If it keeps happening, double-click **Collect logs.bat** in the folder and send the zip it puts on your Desktop to the project owner. |
+| Anything else | Close everything and start again. If it keeps happening, open the **Tools** menu, choose **4** (collect logs) and send the zip to the project owner. |
 
 Every conversation is recorded on this PC (in `%LOCALAPPDATA%\sw_mcp`) so problems can be
-investigated. **Collect logs.bat** packs those records into one zip. It never contains your API keys.
+investigated. Tools menu option **4** (or **Collect logs.bat**) packs them into one zip. It never contains
+your API keys.
 
 ## Good to know
 

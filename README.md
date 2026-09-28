@@ -11,7 +11,8 @@ links the tools to OpenCode, VS Code Copilot, Gemini CLI, Claude Desktop and oth
 
 > **SolidWorks users (no coding needed):** read [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 > In short: double-click **Install SolidWorks Assistant.bat**, connect a free AI provider when
-> asked, then double-click **SolidWorks Assistant** to open it in your browser.
+> asked, then double-click **SolidWorks Assistant** to open it in your browser. Everything else
+> (checking SolidWorks, collecting logs, providers, updates) is in **SolidWorks Assistant - Tools.bat**.
 
 ## Setup on the SolidWorks PC
 
@@ -24,7 +25,8 @@ links the tools to OpenCode, VS Code Copilot, Gemini CLI, Claude Desktop and oth
    runs the unit tests, starts the **AI provider wizard** (below) and offers a desktop shortcut.
    It is safe to run again after every `git pull`. (`Install SolidWorks Assistant.bat` does the
    same with a double-click; `-Quiet` skips all questions.)
-2. Check SolidWorks works end to end. This starts SolidWorks if needed, edits a test block,
+2. Check SolidWorks works end to end (Tools menu option 3, or `sw-agent check`, which runs
+   the script below and then zips the logs). This starts SolidWorks if needed, edits a test block,
    then builds parts from scratch (holes, pockets, repeats, a flange from one plan), checking
    every step, all in a temp folder:
    ```powershell
