@@ -309,6 +309,23 @@ async def build_checks(client: Client, work: str) -> None:
     await step(f"flange: summary (expect about {flange:.0f} mm3, 1 body)", "get_model_summary",
                lambda o: o.get("bodies") == 1 and abs(o.get("volume_mm3", 0) - flange) < 0.01 * flange)
 
+    # The same flange from ONE plan (what the agent does): one call, checked against "expect".
+    plan = {"name": "PlanFlange", "steps": [
+        {"op": "cylinder", "start": [0, 0, 0], "end": [0, 10, 0], "diameter": 90},
+        {"op": "cylinder", "mode": "cut", "start": [35, -1, 0], "end": [35, 11, 0], "diameter": 8},
+        {"op": "repeat_around", "copies": 5, "angle_step": 60},
+        {"op": "cylinder", "mode": "cut", "start": [0, -1, 0], "end": [0, 11, 0], "diameter": 30},
+        {"op": "cylinder", "start": [-10, 10, 25], "end": [-10, 16, 25], "diameter": 6},
+        {"op": "repeat", "copies": 2, "step": [10, 0, 0]},
+    ], "expect": {"size": [90, 16, 90], "bodies": 1}}
+    await step("build_part: whole flange from one plan", "build_part",
+               lambda o: o.get("check") == "matches the plan" and abs(o.get("volume_mm3", 0) - flange) < 0.01 * flange,
+               plan=json.dumps(plan))
+    bad = await tool(client, "build_part",
+                     plan='{"steps":[{"op":"cylinder","start":[0,0,0],"end":[5,5,0],"diameter":3}]}')
+    rejected = bad.get("error") == "BAD_ARGUMENT" and "Step 1 (cylinder)" in bad.get("message", "")
+    record("build: build_part rejects a bad plan before building", "PASS" if rejected else "FAIL", short(bad, 400))
+
 
 def write_report() -> None:
     passed = sum(1 for _, s, _ in results if s == "PASS")

@@ -70,6 +70,7 @@ OpenCode shows each tool with the server name as a prefix, e.g. `solidworks_get_
 | `get_selection_context` | `max_items=5` | Describes what the user clicked: face (surface, normal, radius, area, owning feature and its dimensions), edge, dimension, mate, component or vertex. |
 | `set_dimension` | `dimension_name`, `new_value` | Changes a dimension (mm or degrees) and rebuilds. If the rebuild breaks, the old value is restored automatically. |
 | `save_document` | `save_as_path=""`, `overwrite=false` | Saves in place, or saves as / exports by extension (.step .stl .pdf .dxf .igs .x_t …). It refuses to overwrite a file unless told to. |
+| `build_part` | `plan` (JSON), `start_new_part=true` | **Builds a whole part from one plan** in one call. The plan is checked before anything is built, then every step is built and verified, and the final size is compared with `expect`. On failure it names the step. This is the fastest route and uses the fewest requests. |
 | `new_part` | none | Creates an empty part from the default template. |
 | `make_box` | `mode` (add/cut), `x/y/z_min_mm`, `x/y/z_max_mm` | Adds or cuts a block between world coordinates: plates, ribs, pockets, slots. |
 | `make_cylinder` | `mode`, start and end centers (`start_x_mm` … `end_z_mm`), `diameter_mm` | Adds a boss or rod, or cuts a hole, along X, Y or Z. |

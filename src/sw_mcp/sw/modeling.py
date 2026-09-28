@@ -688,6 +688,12 @@ def _probe(axis: str) -> list[float]:
 
 
 def new_part(app: Any) -> dict:
+    doc = create_part(app)
+    return {"created": try_call(doc, "GetTitle"),
+            "next": "Build the base shape first (make_box or make_cylinder), then add or cut features."}
+
+
+def create_part(app: Any) -> Any:
     template = try_call(app, "GetUserPreferenceStringValue", 8)  # swDefaultTemplatePart
     if not template:
         template = try_call(app, "GetDocumentTemplate", 1, "", 0, 0.0, 0.0)
@@ -699,5 +705,4 @@ def new_part(app: Any) -> dict:
         raise SwError(Code.SW_ERROR, f"SolidWorks could not create a part from {template}.",
                       "Ask the user to check the default part template.")
     _last_group.pop(_doc_key(doc), None)  # a reused title must not inherit an old shape
-    return {"created": try_call(doc, "GetTitle"),
-            "next": "Build the base shape first (make_box or make_cylinder), then add or cut features."}
+    return doc

@@ -161,6 +161,38 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - The smoke test now uses repeats for the corner holes, and adds a flange (bolt circle + row of pins) with volume checks. 86 tests pass.
 - [ ] **Roadmap toward "make a V4 engine" (the user wants complex builds):** batch 2 angled cylinders/boxes (any direction) → batch 3 revolve → batch 4 assemblies (save parts, new assembly, place parts at position + angle) → batch 5 a big-job agent mode (parts list, build part by part into a project folder, higher step limit, resumable plan).
 - [ ] Waiting on the user: run the smoke test again to check the fixes plus repeats.
+
+## 6. New direction (2026-09-28): a product for SolidWorks users who do not code
+
+**The user's idea:**
+- A "smart router" for models.
+- An installer that walks the user through getting API keys: it opens the OpenRouter page, then similar services, and the user pastes each key into the terminal.
+- Possibly our own OpenCode-like client, because OpenCode's free models do not work for us.
+- Goal: non-coders catch up in their domain (SolidWorks).
+
+**Research findings:**
+- Free tiers churn constantly. Sources from Mar–Jun 2026 conflict: one says Cerebras went card-only, GitHub Models shut down and OpenRouter's June free models became paid.
+- Stable no-card options at the time: Google AI Studio (Gemini), Groq, OpenRouter (:free models, 50 requests/day, 1000/day after a one-time $10), Mistral, NVIDIA NIM, Cohere, Hugging Face.
+- Most are OpenAI-compatible.
+- → The design must be **data-driven**: a provider registry that is updated without code changes, and keys **probed at setup** for tool calling.
+
+**Plan APPROVED 2026-09-28.** User decisions: terminal UI first (browser UI later as well); the wizard shows the training/privacy warning per provider but the user chooses; English only.
+
+**Phase status:**
+- [x] **P1 done:** `src/sw_mcp/sw/plan.py` (pydantic Plan with ops box/cylinder/prism/fillet/chamfer/repeat/repeat_around, lenient JSON, errors naming the step, dry-run `check_plan`, `execute` with fail-fast, progress in the error, auto-close of the failed unsaved part, `expect` size/bodies check) and tool `build_part(plan, start_new_part)`. The agent prompt now uses build_part for new parts. The smoke test builds the flange from one plan. 103 tests pass.
+- [ ] P2 next: provider registry + setup wizard + keyring.
+
+**Plan:**
+- **P1 Plan-as-data:** the LLM writes the whole part as one JSON plan (the existing primitives). The server validates it with pydantic and executes it deterministically with verification, with a repair loop on errors. This takes about 2–5 LLM requests per part instead of about 30, and makes weak or free models viable. It lives in sw_mcp, so all clients benefit.
+- **P2 Setup wizard:** a provider registry (yaml) → for each provider, open its key page → hidden paste → validate the key plus a tool-call probe → store in Windows Credential Manager (`keyring`), never in plaintext. It also warns about free tiers that train on prompts, and optionally writes configs for OpenCode, VS Code Copilot, Gemini CLI and Claude Desktop.
+- **P3 Our own client "sw_agent":** a focused SolidWorks assistant, not a coding agent.
+  - It talks to the MCP server over stdio.
+  - A router (LiteLLM Router or our own) handles fallback on 429s, cooldowns and daily quotas.
+  - Roles: planner (strongest model), deterministic executor, fixer (called only on errors), chat/edit (cheap model).
+  - Terminal UI first.
+- **P4 Model bench:** run the test prompts against the **fake SolidWorks** (no SW needed) to score and rank each provider's models automatically. The router uses these scores.
+- **P5 Geometry:** angled shapes → revolve → assemblies → big-job mode (V4 engine).
+- **P6 Non-coder packaging:** a local browser UI (chat, progress, part screenshot), a one-click installer, and simple-language docs.
 - **Unverified on real SolidWorks:** MathUtility.CreatePoint with a VT_R8 array, FeatureCut4/FeatureExtrusion3 with a start offset, FeatureFillet3 with None arrays, IPartDoc methods (GetBodies2/GetPartBox) through late binding, IFeature.GetFaces, and IFace2.GetBox.
 
 ### Next batch after the smoke report

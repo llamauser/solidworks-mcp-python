@@ -14,7 +14,8 @@ from sw_mcp.server import create_server
 PRIMITIVES = {"string", "number", "integer", "boolean"}
 MAX_PARAMS = 8  # geometry needs up to 8 plain numbers (two 3D points + diameter); still flat
 MAX_DESCRIPTION_CHARS = 900  # per tool docstring
-MAX_TOTAL_SCHEMA_CHARS = 12500  # the whole tools/list payload the model must read each turn
+LONG_DESCRIPTION_TOOLS = {"build_part": 1400}  # carries the whole plan format
+MAX_TOTAL_SCHEMA_CHARS = 14500  # the whole tools/list payload the model must read each turn
 
 
 async def _list_tools():
@@ -31,7 +32,7 @@ def test_all_tools_present(tools):
     assert {t.name for t in tools} == {
         "get_status", "open_document", "get_selection_context", "set_dimension", "save_document",
         "new_part", "make_box", "make_cylinder", "make_prism", "finish_edges", "undo_last_feature",
-        "repeat_last_shape", "repeat_last_shape_around",
+        "repeat_last_shape", "repeat_last_shape_around", "build_part",
         "get_model_summary",
     }
 
@@ -66,7 +67,8 @@ def test_docstrings_follow_the_template(tools):
         desc = t.description or ""
         assert "Use when" in desc, t.name
         assert "Example" in desc, t.name
-        assert len(desc) <= MAX_DESCRIPTION_CHARS, f"{t.name} description is {len(desc)} chars"
+        limit = LONG_DESCRIPTION_TOOLS.get(t.name, MAX_DESCRIPTION_CHARS)
+        assert len(desc) <= limit, f"{t.name} description is {len(desc)} chars"
 
 
 def test_whole_tool_list_fits_the_budget(tools):
