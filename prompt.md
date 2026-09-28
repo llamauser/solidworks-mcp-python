@@ -129,6 +129,8 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
 - [x] Wrote the tests (`tests/fakes/fake_sw.py`, plus test files for com_utils, com_worker, resilience, tools and tool schemas): **59 passing** (`.venv/Scripts/python -m pytest -q`).
 - [x] Wrote `scripts/smoke_test.py`. Run here, it starts the real server over stdio in 1.5 s and reports NO_SOLIDWORKS cleanly.
 - [x] Wrote `opencode.json`, `.opencode/agents/solidworks.md` (denies bash, edit, webfetch, websearch and task; allows `solidworks_*`), `install.ps1` (tested here: writes opencode.json as valid JSON with no BOM), `docs/model-test-prompts.md`, `README.md` and `.gitignore`.
+- [x] Pushed to the private repo https://github.com/llamauser/solidworks-mcp-python (`references/` is excluded).
+- [x] **Changed after the user's first OpenCode run:** OpenCode's free tier rejects custom agents with "OpenCode's free tier can only be used from within OpenCode" (anomalyco/opencode#50806, #49592; only `agent=build` is accepted). The custom agent `.opencode/agents/solidworks.md` was **removed**. `opencode.json` (and `install.ps1`) now reconfigure the built-in `build` agent instead: prompt `{file:./.opencode/solidworks-prompt.md}`, temperature 0.1, and the same deny/allow permissions. The notes above about a custom agent file are superseded.
 - [ ] **Waiting on the user:** run `install.ps1` and `scripts/smoke_test.py` on the SolidWorks PC, then paste back `smoke_test_report.txt`.
 
 ### Not yet verified on real SolidWorks (check these in the smoke report)

@@ -29,6 +29,20 @@ $json = @"
       "enabled": true,
       "timeout": 10000
     }
+  },
+  "agent": {
+    "build": {
+      "prompt": "{file:./.opencode/solidworks-prompt.md}",
+      "temperature": 0.1,
+      "permission": {
+        "bash": "deny",
+        "edit": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "task": "deny",
+        "solidworks_*": "allow"
+      }
+    }
   }
 }
 "@
@@ -44,5 +58,5 @@ Write-Host "  1. Open SolidWorks (or let the smoke test start it)."
 Write-Host "  2. Run the end-to-end check:   .venv\Scripts\python scripts\smoke_test.py"
 Write-Host "     and send back smoke_test_report.txt"
 Write-Host "  3. Start OpenCode in this folder:   opencode"
-Write-Host "     Press Tab to switch to the 'solidworks' agent, pick a model, and ask:"
+Write-Host "     Use the default 'build' agent (in this folder it is locked to the SolidWorks tools), pick a model, and ask:"
 Write-Host "     'What version of SolidWorks is running?'"

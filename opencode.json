@@ -7,5 +7,19 @@
       "enabled": true,
       "timeout": 10000
     }
+  },
+  "agent": {
+    "build": {
+      "prompt": "{file:./.opencode/solidworks-prompt.md}",
+      "temperature": 0.1,
+      "permission": {
+        "bash": "deny",
+        "edit": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "task": "deny",
+        "solidworks_*": "allow"
+      }
+    }
   }
 }

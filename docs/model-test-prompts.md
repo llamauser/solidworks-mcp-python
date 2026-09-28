@@ -1,6 +1,7 @@
 # Comparing the free OpenCode models
 
-Run these five prompts with each model, using the **solidworks** agent (press Tab in OpenCode).
+Run these five prompts with each model, using the default **build** agent in this folder.
+`opencode.json` locks that agent to the SolidWorks tools.
 Start each model from the same state: SolidWorks open, the smoke-test block (or any simple part)
 open, and nothing selected. Mark a prompt as a pass only if the model called the expected tools
 and reported the numbers the tools actually returned.
@@ -16,7 +17,7 @@ and reported the numbers the tools actually returned.
 Watch for these failure patterns:
 - **Wrong units:** it passes meters (0.015) instead of millimeters (15). The server flags suspicious jumps in a `warning` field.
 - **Invented names:** it guesses `D1@Extrude1` instead of copying the name from `dims`.
-- **Code instead of tools:** it tries to write a script. The agent blocks bash and edit, but note it anyway.
+- **Code instead of tools:** it tries to write a script. The config blocks bash and edit, but note it anyway.
 - **Retry loops:** it repeats the same failing call instead of following `fix`.
 
 ## Scorecard

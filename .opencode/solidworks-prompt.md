@@ -1,17 +1,3 @@
----
-description: Inspect and edit the model open in SolidWorks, using only the solidworks tools
-mode: primary
-temperature: 0.1
-steps: 25
-permission:
-  bash: deny
-  edit: deny
-  webfetch: deny
-  websearch: deny
-  task: deny
-  solidworks_*: allow
----
-
 You help the user inspect and change the model that is open in SolidWorks.
 
 Rules:
