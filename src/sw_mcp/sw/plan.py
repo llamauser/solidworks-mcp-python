@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from ..core.com_utils import try_call
 from ..core.errors import Code, SwError
 from . import modeling as m
+from . import project
 
 Vec3 = tuple[float, float, float]
 Range = tuple[float, float]
@@ -28,12 +29,21 @@ class _Step(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class Rotate(BaseModel):
+    """Tilt a shape after building it: right-hand rotation about a line parallel to `axis`."""
+    model_config = ConfigDict(extra="forbid")
+    axis: Literal["x", "y", "z"]
+    deg: float
+    about: Vec3 = (0.0, 0.0, 0.0)
+
+
 class BoxStep(_Step):
     op: Literal["box"]
     mode: Mode = "add"
     x: Range
     y: Range
     z: Range
+    rotate: Rotate | None = None
 
 
 class CylinderStep(_Step):
@@ -42,6 +52,13 @@ class CylinderStep(_Step):
     start: Vec3
     end: Vec3
     diameter: float = Field(gt=0)
+    rotate: Rotate | None = None
+
+
+def _pairs(value: Any) -> Any:
+    if isinstance(value, str):  # also accept "a,b; a,b; a,b"
+        return m.parse_points(value)
+    return value
 
 
 class PrismStep(_Step):
@@ -51,13 +68,21 @@ class PrismStep(_Step):
     points: list[tuple[float, float]] = Field(min_length=3, max_length=64)
     start: float
     end: float
+    rotate: Rotate | None = None
 
-    @field_validator("points", mode="before")
-    @classmethod
-    def _points_from_text(cls, value: Any) -> Any:
-        if isinstance(value, str):  # also accept "a,b; a,b; a,b"
-            return m.parse_points(value)
-        return value
+    _points_from_text = field_validator("points", mode="before")(_pairs)
+
+
+class RevolveStep(_Step):
+    """Spin a half-profile of (radius, position along the axis) points around an axis."""
+    op: Literal["revolve"]
+    mode: Mode = "add"
+    axis: Literal["x", "y", "z"]
+    center: Vec3 = (0.0, 0.0, 0.0)
+    profile: list[tuple[float, float]] = Field(min_length=3, max_length=64)
+    angle: float = 360.0
+
+    _profile_from_text = field_validator("profile", mode="before")(_pairs)
 
 
 class EdgeStep(_Step):
@@ -80,10 +105,10 @@ class RepeatAroundStep(_Step):
 
 
 Step = Annotated[
-    Union[BoxStep, CylinderStep, PrismStep, EdgeStep, RepeatStep, RepeatAroundStep],
+    Union[BoxStep, CylinderStep, PrismStep, RevolveStep, EdgeStep, RepeatStep, RepeatAroundStep],
     Field(discriminator="op"),
 ]
-OPS = ("box", "cylinder", "prism", "fillet", "chamfer", "repeat", "repeat_around")
+OPS = ("box", "cylinder", "prism", "revolve", "fillet", "chamfer", "repeat", "repeat_around")
 
 
 class Expect(BaseModel):
@@ -171,34 +196,46 @@ def parse_plan(text: str) -> Plan:
 
 
 # ---------------------------------------------------------------- dry run
-def shape_of(step: Any) -> m.Shape | None:
+def shape_of(step: Any) -> m.Shape | m.Revolve | None:
     cut = getattr(step, "mode", "add") == "cut"
+    shape: m.Shape | None = None
     if isinstance(step, BoxStep):
-        return m.box_shape(*step.x, *step.y, *step.z, cut)
-    if isinstance(step, CylinderStep):
-        return m.cylinder_shape(*step.start, *step.end, step.diameter, cut)
-    if isinstance(step, PrismStep):
+        shape = m.box_shape(*step.x, *step.y, *step.z, cut)
+    elif isinstance(step, CylinderStep):
+        shape = m.cylinder_shape(*step.start, *step.end, step.diameter, cut)
+    elif isinstance(step, PrismStep):
         pts = "; ".join(f"{a},{b}" for a, b in step.points)
-        return m.prism_shape(step.axis, pts, step.start, step.end, cut)
-    return None
+        shape = m.prism_shape(step.axis, pts, step.start, step.end, cut)
+    elif isinstance(step, RevolveStep):
+        return m.revolve_spec(step.axis, step.center, step.profile, step.angle, cut)
+    rot = getattr(step, "rotate", None)
+    if shape is not None and rot is not None and abs(rot.deg) > 1e-9:
+        shape.tilt = (rot.axis, rot.deg, tuple(rot.about))
+    return shape
 
 
-def check_plan(plan: Plan) -> list[m.Shape | None]:
+def check_plan(plan: Plan) -> list[m.Shape | m.Revolve | None]:
     """Validate geometry without SolidWorks. Returns the shape for each step (None otherwise)."""
-    shapes: list[m.Shape | None] = []
+    shapes: list[m.Shape | m.Revolve | None] = []
     group = 0
+    tilted = False
     for i, step in enumerate(plan.steps, 1):
         try:
             shape = shape_of(step)
         except SwError as err:
             raise SwError(Code.BAD_ARGUMENT, f"Step {i} ({step.op}): {err.message}",
                           f"{err.fix} Nothing was built; send the corrected plan.") from None
-        if shape is not None:
-            group = 1
+        if isinstance(shape, m.Revolve):
+            group, tilted = 0, False  # a revolve cannot be repeated
+        elif shape is not None:
+            group, tilted = 1, shape.tilt is not None
         elif isinstance(step, (RepeatStep, RepeatAroundStep)):
             if group == 0:
                 raise SwError(Code.BAD_ARGUMENT, f"Step {i} ({step.op}) has nothing to repeat.",
                               "Put a box, cylinder or prism step before it.")
+            if isinstance(step, RepeatAroundStep) and tilted:
+                raise SwError(Code.BAD_ARGUMENT, f"Step {i} (repeat_around) cannot repeat a tilted shape.",
+                              "Use a row repeat, or write each tilted copy as its own step.")
             if group * step.copies > m.MAX_COPIES:
                 raise SwError(Code.BAD_ARGUMENT,
                               f"Step {i} ({step.op}) would make {group * step.copies} shapes; the limit is {m.MAX_COPIES}.",
@@ -213,7 +250,7 @@ def check_plan(plan: Plan) -> list[m.Shape | None]:
             group += group * step.copies
         shapes.append(shape)
     if all(s is None for s in shapes):
-        raise SwError(Code.BAD_ARGUMENT, "The plan has no box, cylinder or prism step.",
+        raise SwError(Code.BAD_ARGUMENT, "The plan has no box, cylinder, prism or revolve step.",
                       "Start with the base body, e.g. a box.")
     return shapes
 
@@ -228,9 +265,12 @@ def _close_failed_builds(app: Any) -> None:
         try_call(app, "CloseDoc", title)
 
 
-def execute(app: Any, doc: Any | None, plan: Plan) -> dict:
-    """Build the plan. With doc=None a new part is created first."""
+def execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "") -> dict:
+    """Build the plan. With doc=None a new part is created first. save_as="project/part"
+    saves the finished part into the projects folder."""
     shapes = check_plan(plan)
+    if save_as.strip():
+        project.split_name(save_as)  # reject a bad name before building anything
     _close_failed_builds(app)
     created = doc is None
     if created:
@@ -241,7 +281,9 @@ def execute(app: Any, doc: Any | None, plan: Plan) -> dict:
     log: list[str] = []
     for i, (step, shape) in enumerate(zip(plan.steps, shapes), 1):
         try:
-            if shape is not None:
+            if isinstance(shape, m.Revolve):
+                log.append(modeler.revolve(shape)["feature"])
+            elif shape is not None:
                 out = modeler.build(shape)
                 log.append(out["feature"])
             elif isinstance(step, EdgeStep):
@@ -279,5 +321,9 @@ def execute(app: Any, doc: Any | None, plan: Plan) -> dict:
         out["check"] = "MISMATCH: " + "; ".join(problems) + ". Find the step with the wrong numbers and rebuild."
     else:
         out["check"] = "matches the plan" if exp else "no expect given"
-    out["next"] = "Tell the user what was built. Save with save_document if they want to keep it."
+    if save_as.strip():
+        out["saved_as"] = project.save_part(doc, save_as)
+        out["next"] = "Saved in the project. Build the next part, or call make_assembly when all parts are done."
+    else:
+        out["next"] = "Tell the user what was built. Save with save_document if they want to keep it."
     return out

@@ -82,6 +82,8 @@ class Shape:
     end: float
     cut: bool
     label: str
+    # Optional rotation applied after building: (axis "x|y|z", degrees, pivot point in mm).
+    tilt: tuple[str, float, tuple[float, float, float]] | None = None
 
     def world_box(self) -> tuple[list[float], list[float]]:
         a0, a1, b0, b1 = self.profile.bounds()
@@ -190,12 +192,19 @@ def translated(shape: Shape, dx: float, dy: float, dz: float) -> Shape:
     n = AXIS_INDEX[shape.axis]
     pts = [(a + d[ia], b + d[ib]) for a, b in shape.profile.points]
     prof = Profile(shape.profile.kind, pts, shape.profile.radius)
-    return Shape(shape.axis, prof, shape.start + d[n], shape.end + d[n], shape.cut, shape.label)
+    tilt = None
+    if shape.tilt:
+        axis, deg, about = shape.tilt
+        tilt = (axis, deg, (about[0] + dx, about[1] + dy, about[2] + dz))
+    return Shape(shape.axis, prof, shape.start + d[n], shape.end + d[n], shape.cut, shape.label, tilt)
 
 
 def rotated(shape: Shape, angle_deg: float, center: tuple[float, float, float]) -> Shape:
     """Rotate a shape about a line parallel to its own axis through `center` (right-hand rule
     about the +axis direction). The profile turns in its plane; the extent along the axis stays."""
+    if shape.tilt:
+        raise _bad("A tilted shape cannot be repeated around a circle.",
+                   "Repeat it in a row instead, or write each tilted copy as its own step.")
     ia, ib = IN_PLANE[shape.axis]
     ca, cb = center[ia], center[ib]
     # In-plane (a, b) are (y,z) for x and (x,y) for z: right-handed. For y they are (x,z),
@@ -208,6 +217,97 @@ def rotated(shape: Shape, angle_deg: float, center: tuple[float, float, float]) 
     return Shape(shape.axis, prof, shape.start, shape.end, shape.cut, shape.label)
 
 
+def rotate_point(p: list[float] | tuple, axis: str, deg: float, about: tuple) -> list[float]:
+    """Right-hand rotation of a world point about a line parallel to `axis` through `about`."""
+    t = math.radians(deg)
+    c, s_ = math.cos(t), math.sin(t)
+    x, y, z = (p[0] - about[0], p[1] - about[1], p[2] - about[2])
+    if axis == "x":
+        y, z = y * c - z * s_, y * s_ + z * c
+    elif axis == "y":
+        x, z = x * c + z * s_, -x * s_ + z * c
+    else:
+        x, y = x * c - y * s_, x * s_ + y * c
+    return [x + about[0], y + about[1], z + about[2]]
+
+
+def surface_points(shape: Shape) -> list[list[float]]:
+    """Points on the shape's outline at both ends (rims sampled for circles)."""
+    prof = shape.profile
+    if prof.kind == "circle":
+        (a, b), r = prof.points[0], prof.radius
+        ring = [(a + r * math.cos(k * math.pi / 36), b + r * math.sin(k * math.pi / 36)) for k in range(72)]
+    else:
+        ring = prof.points
+    return [shape.world_point(a, b, along) for along in (shape.start, shape.end) for a, b in ring]
+
+
+def tilted_box(shape: Shape) -> tuple[list[float], list[float]]:
+    axis, deg, about = shape.tilt  # type: ignore[misc]
+    pts = [rotate_point(p, axis, deg, about) for p in surface_points(shape)]
+    return [min(p[i] for p in pts) for i in range(3)], [max(p[i] for p in pts) for i in range(3)]
+
+
+def boxes_match(a: tuple[list[float], list[float]], b: tuple[list[float], list[float]], tol: float = 0.5) -> bool:
+    return all(abs(a[k][i] - b[k][i]) <= tol + 0.01 * abs(b[1][i] - b[0][i]) for k in range(2) for i in range(3))
+
+
+@dataclass
+class Revolve:
+    axis: str
+    center: tuple[float, float, float]
+    profile: list[tuple[float, float]]  # (radius from the axis, position along the axis), mm
+    angle: float
+    cut: bool
+    label: str
+
+    def world(self, r: float, h: float, radial: int) -> list[float]:
+        p = list(self.center)
+        p[AXIS_INDEX[self.axis]] = h
+        p[radial] += r
+        return p
+
+    def box(self) -> tuple[list[float], list[float]]:
+        rmax = max(r for r, _ in self.profile)
+        hs = [h for _, h in self.profile]
+        lo, hi = [c - rmax for c in self.center], [c + rmax for c in self.center]
+        n = AXIS_INDEX[self.axis]
+        lo[n], hi[n] = min(hs), max(hs)
+        return lo, hi
+
+    def sketch_plane(self) -> tuple[str, int]:
+        """(normal axis of the default plane that contains the revolve axis, radial world index)."""
+        options = {"y": (("z", 0), ("x", 2)), "x": (("z", 1), ("y", 2)), "z": (("y", 0), ("x", 1))}
+        for normal, radial in options[self.axis]:
+            if abs(self.center[AXIS_INDEX[normal]]) < 1e-6:
+                return normal, radial
+        raise _bad(
+            f"A revolve around {self.axis.upper()} needs its axis on a default plane.",
+            {"y": "Set center x=0 or z=0.", "x": "Set center y=0 or z=0.", "z": "Set center x=0 or y=0."}[self.axis]
+            + " Build the round part at the origin; other parts can be positioned around it.",
+        )
+
+
+def revolve_spec(axis: str, center: tuple, profile: list[tuple[float, float]], angle: float, cut: bool) -> Revolve:
+    pts = [(float(r), float(h)) for r, h in profile]
+    if len(pts) >= 2 and math.dist(pts[0], pts[-1]) < 1e-6:
+        pts.pop()
+    if len(pts) < 3:
+        raise _bad("A revolve profile needs at least 3 points (radius, position along the axis).",
+                   'Example for a disc 40 mm wide and 10 thick: [[0,0],[20,0],[20,10],[0,10]].')
+    if any(r < -1e-9 for r, _ in pts):
+        raise _bad("Revolve profile radii must be 0 or more (the profile must stay on one side of the axis).",
+                   "Use the distance from the axis as the first number of each point.")
+    if Profile("polygon", pts).area() < 1e-6:
+        raise _bad("The revolve profile does not enclose an area.", "List the corners in order around the outline.")
+    if not 0 < angle <= 360:
+        raise _bad("The revolve angle must be between 0 and 360 degrees.", "Use 360 for a full round part.")
+    spec = Revolve(axis, tuple(float(c) for c in center), pts, float(angle), cut,
+                   "Cut-Revolve" if cut else "Revolve")
+    spec.sketch_plane()  # validates that the axis lies on a default plane
+    return spec
+
+
 def placement_ok(shape: Shape, face_boxes_mm: list[tuple[list[float], list[float]]], tol: float = TOL_MM) -> bool:
     """True when most faces of the new feature sit inside the requested region.
 
@@ -216,7 +316,7 @@ def placement_ok(shape: Shape, face_boxes_mm: list[tuple[list[float], list[float
     """
     if not face_boxes_mm:
         return False
-    lo, hi = shape.world_box()
+    lo, hi = shape.world_box() if isinstance(shape, Shape) else shape
     inside = 0
     for fmin, fmax in face_boxes_mm:
         center = [(fmin[i] + fmax[i]) / 2 for i in range(3)]
@@ -411,9 +511,12 @@ class Modeler:
             return (lambda p: (table(p)[0], -table(p)[1])), "table-mirrored"
         return table, "table"
 
-    def _sketch(self, shape: Shape, mirror: bool) -> tuple[Any, str]:
+    def _draw(self, plane_axis: str, mirror: bool, polygon: list[list[float]] | None = None,
+              circle: tuple[list[float], float] | None = None,
+              centerline: tuple[list[float], list[float]] | None = None) -> tuple[Any, str]:
+        """Draw on the default plane whose normal is `plane_axis`. Points are world mm."""
         self.exit_sketch()
-        plane = self.default_planes()[PLANE_INDEX[shape.axis]]
+        plane = self.default_planes()[PLANE_INDEX[plane_axis]]
         self.select_only(plane)
         sm = call(self.doc, "SketchManager")
         call(sm, "InsertSketch", True)
@@ -421,25 +524,32 @@ class Modeler:
         if sketch is None:
             raise SwError(Code.SW_ERROR, "SolidWorks did not open a sketch on the default plane.",
                           "Call get_status, then try again.")
-        to_sketch, how = self._mapper(sketch, shape.axis, mirror)
+        to_sketch, how = self._mapper(sketch, plane_axis, mirror)
+
+        def uv(p: list[float]) -> tuple[float, float]:
+            return to_sketch([c / 1000 for c in p])
+
         try:
             sm.AddToDB = True  # exact coordinates, no snapping to nearby geometry
         except Exception:  # noqa: BLE001
             pass
         failed = False
         try:
-            prof = shape.profile
-            if prof.kind == "circle":
-                u, v = to_sketch([c / 1000 for c in shape.world_point(*prof.points[0])])
-                if call(sm, "CreateCircleByRadius", u, v, 0.0, prof.radius / 1000) is None:
+            if circle is not None:
+                u, v = uv(circle[0])
+                if call(sm, "CreateCircleByRadius", u, v, 0.0, circle[1] / 1000) is None:
                     raise SwError(Code.SW_ERROR, "SolidWorks could not draw the circle.", "Check the diameter.")
-            else:
-                uv = [to_sketch([c / 1000 for c in shape.world_point(a, b)]) for a, b in prof.points]
-                for i, (u1, v1) in enumerate(uv):
-                    u2, v2 = uv[(i + 1) % len(uv)]
+            if polygon is not None:
+                pts = [uv(p) for p in polygon]
+                for i, (u1, v1) in enumerate(pts):
+                    u2, v2 = pts[(i + 1) % len(pts)]
                     if call(sm, "CreateLine", u1, v1, 0.0, u2, v2, 0.0) is None:
                         raise SwError(Code.SW_ERROR, "SolidWorks could not draw the outline.",
                                       "Check that the points do not repeat or cross.")
+            if centerline is not None:
+                (u1, v1), (u2, v2) = uv(centerline[0]), uv(centerline[1])
+                if call(sm, "CreateCenterLine", u1, v1, 0.0, u2, v2, 0.0) is None:
+                    raise SwError(Code.SW_ERROR, "SolidWorks could not draw the revolve axis.", "Try again.")
         except BaseException:
             failed = True
             raise
@@ -453,7 +563,13 @@ class Modeler:
                 self.delete(self.last_feature())  # do not leave a half-drawn sketch behind
         return self.last_feature(), how
 
-    def _extrude(self, shape: Shape, sketch_feat: Any, reverse: bool, flip_offset: bool) -> Any:
+    def _sketch(self, shape: Shape, mirror: bool) -> tuple[Any, str]:
+        prof = shape.profile
+        if prof.kind == "circle":
+            return self._draw(shape.axis, mirror, circle=(shape.world_point(*prof.points[0]), prof.radius))
+        return self._draw(shape.axis, mirror, polygon=[shape.world_point(a, b) for a, b in prof.points])
+
+    def _extrude(self, shape: Shape, sketch_feat: Any, reverse: bool, flip_offset: bool, merge: bool = True) -> Any:
         self.select_only(sketch_feat)
         fm = call(self.doc, "FeatureManager")
         depth = (shape.end - shape.start) / 1000
@@ -466,7 +582,7 @@ class Modeler:
                         f, True, True, f, f, f, t0, offset, flip_offset, f)
         return call(fm, "FeatureExtrusion3",
                     True, f, reverse, 0, 0, depth, 0.0, f, f, f, f, z, z, f, f, f, f,
-                    True, True, True, t0, offset, flip_offset)
+                    merge, True, True, t0, offset, flip_offset)
 
     def _face_boxes(self, feature: Any) -> list[tuple[list[float], list[float]]]:
         boxes = []
@@ -476,8 +592,8 @@ class Modeler:
                 boxes.append((_m(b[0:3]), _m(b[3:6])))
         return boxes
 
-    def build(self, shape: Shape) -> dict:
-        volume_before = self.volume_mm3()
+    def _place(self, shape: Shape, merge: bool = True) -> Any:
+        """Sketch + extrude until the result sits where asked (see module docstring)."""
         at_plane = abs(shape.start) < 1e-6
         guess_flip = shape.start < 0
         # Measured on SOLIDWORKS 2024: a boss goes along +normal with reverse=False, while a cut
@@ -496,14 +612,14 @@ class Modeler:
                 exact_transform = how == "transform"
                 feature = None
                 try:
-                    feature = self._extrude(shape, sketch_feat, reverse, flip)
+                    feature = self._extrude(shape, sketch_feat, reverse, flip, merge)
                 except Exception as exc:  # noqa: BLE001 - a rejected direction is just a failed attempt
                     log.info("extrude attempt failed: %s", exc)
                 tried.append(f"reverse={reverse} flip={flip} sketch={how} -> {'feature' if feature else 'none'}")
                 if feature is not None and placement_ok(shape, self._face_boxes(feature)):
                     log.info("built %s %s..%s along %s; attempts: %s",
                              shape.label, shape.start, shape.end, shape.axis, "; ".join(tried))
-                    return self._finish(shape, feature, volume_before, len(tried))
+                    return feature
                 self.delete(feature if feature is not None else sketch_feat)
         log.warning("build failed for %s: %s", shape, tried)
         verb = "cut" if shape.cut else "add"
@@ -514,9 +630,16 @@ class Modeler:
              "touches the part. Call get_model_summary to see where the part is."),
         )
 
-    def _finish(self, shape: Shape, feature: Any, volume_before: float, attempts: int) -> dict:
-        _last_group[_doc_key(self.doc)] = [shape]
-        name = self.unique_name(shape.label)
+    def build(self, shape: Shape) -> dict:
+        if shape.tilt and abs(shape.tilt[1]) > 1e-9:
+            return self.build_tilted(shape)
+        volume_before = self.volume_mm3()
+        feature = self._place(shape)
+        return self._finish(shape, feature, volume_before)
+
+    def _finish(self, shape: Shape, feature: Any, volume_before: float, label: str | None = None) -> dict:
+        _last_group[_doc_key(self.doc)] = [shape] if isinstance(shape, Shape) else []
+        name = self.unique_name(label or shape.label)
         try:
             feature.Name = name
         except Exception:  # noqa: BLE001 - keep SolidWorks' own name
@@ -532,6 +655,130 @@ class Modeler:
         elif not shape.cut and change < 0.01 and summary.get("bodies", 1) <= 1:
             out["warning"] = "This shape added no material. It is probably completely inside the part."
         return out
+
+    # ---------------------------------------------------------------- tilted shapes
+    def _body_names(self) -> list[str]:
+        return [str(try_call(b, "Name") or "") for b in self.bodies()]
+
+    def _body(self, name: str) -> Any:
+        for b in self.bodies():
+            if try_call(b, "Name") == name:
+                return b
+        return None
+
+    def _body_box(self, name: str) -> tuple[list[float], list[float]] | None:
+        b = as_list(try_call(self._body(name), "GetBodyBox"))
+        return (_m(b[0:3]), _m(b[3:6])) if len(b) >= 6 else None
+
+    def _select_body(self, name: str, append: bool, mark: int) -> bool:
+        ext = call(self.doc, "Extension")
+        return bool(call(ext, "SelectByID2", name, "SOLIDBODY", 0.0, 0.0, 0.0, append, mark, null_dispatch(), 0))
+
+    def _rotate_body(self, name: str, shape: Shape) -> Any:
+        axis, deg, about = shape.tilt  # type: ignore[misc]
+        expected = tilted_box(shape)
+        fm = call(self.doc, "FeatureManager")
+        for sign in (1.0, -1.0):  # right-hand rule first; the other sign if this SolidWorks disagrees
+            call(self.doc, "ClearSelection2", True)
+            if not self._select_body(name, False, 1):
+                raise SwError(Code.SW_ERROR, "SolidWorks could not select the new body to tilt it.", "Try again.")
+            angles = [0.0, 0.0, 0.0]
+            angles[AXIS_INDEX[axis]] = math.radians(deg) * sign
+            feature = call(fm, "InsertMoveCopyBody2", 0.0, 0.0, 0.0, 0.0,
+                           about[0] / 1000, about[1] / 1000, about[2] / 1000, *angles, False, 1)
+            box = self._body_box(name)
+            if feature is not None and box is not None and boxes_match(box, expected):
+                return feature
+            log.info("tilt attempt sign=%s gave %s, expected %s", sign, box, expected)
+            self.delete(feature)
+        raise SwError(Code.SW_ERROR, "SolidWorks did not tilt the shape as expected.",
+                      "Check the rotate axis and angle; or build the shape without rotate.")
+
+    def _combine(self, main: str, tool: str, cut: bool) -> Any:
+        fm = call(self.doc, "FeatureManager")
+        op = 15902 if cut else 15903  # swBodyOperationType_e: SWBODYCUT / SWBODYADD
+        main_body, tool_body = self._body(main), self._body(tool)
+        tools = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH,
+                                        [getattr(tool_body, "_oleobj_", tool_body)])
+        attempts = (
+            lambda: call(fm, "InsertCombineFeature", op, main_body, tools),
+            lambda: (call(self.doc, "ClearSelection2", True), self._select_body(main, False, 1),
+                     self._select_body(tool, True, 2), call(fm, "InsertCombineFeature", op, None, None))[-1],
+        )
+        for attempt in attempts:
+            try:
+                feature = attempt()
+            except Exception:  # noqa: BLE001 - try the selection-based form
+                feature = None
+            if feature is not None and tool not in self._body_names():
+                return feature
+            self.delete(feature)
+        raise SwError(Code.SW_ERROR, f"SolidWorks could not {'cut' if cut else 'join'} the tilted shape.",
+                      "Make sure the tilted shape overlaps the part.")
+
+    def _main_body(self, names: list[str]) -> str:
+        best, best_vol = names[0], -1.0
+        for name in names:
+            props = as_list(try_call(self._body(name), "GetMassProperties", 1.0))
+            vol = float(props[3]) if len(props) > 3 else 0.0
+            if vol > best_vol:
+                best, best_vol = name, vol
+        return best
+
+    def build_tilted(self, shape: Shape) -> dict:
+        volume_before = self.volume_mm3()
+        before = self._body_names()
+        if shape.cut and not before:
+            raise _bad("A tilted cut needs a part to cut from.", "Build the base body first.")
+        tool = Shape(shape.axis, shape.profile, shape.start, shape.end, False, shape.label, shape.tilt)
+        created: list[Any] = []
+        try:
+            created.append(self._place(tool, merge=False))
+            new = [n for n in self._body_names() if n not in before]
+            if len(new) != 1:
+                raise SwError(Code.SW_ERROR, "SolidWorks did not make the tilted shape as a separate body.",
+                              "Build the shape without rotate.")
+            created.append(self._rotate_body(new[0], shape))
+            if before:
+                created.append(self._combine(self._main_body(before), new[0], shape.cut))
+        except BaseException:
+            for feature in reversed(created):
+                self.delete(feature)
+            raise
+        return self._finish(shape, created[-1], volume_before)
+
+    # ---------------------------------------------------------------- revolve
+    def revolve(self, spec: Revolve) -> dict:
+        volume_before = self.volume_mm3()
+        plane_axis, radial = spec.sketch_plane()
+        polygon = [spec.world(r, h, radial) for r, h in spec.profile]
+        hs = [h for _, h in spec.profile]
+        centerline = (spec.world(0, min(hs), radial), spec.world(0, max(hs), radial))
+        expected = spec.box()
+        fm = call(self.doc, "FeatureManager")
+        angle = math.radians(spec.angle) if spec.angle < 360 else 2 * math.pi
+        tried: list[str] = []
+        exact = False
+        for mirror in (False, True):
+            if mirror and exact:
+                break
+            for reverse in (False, True) if spec.angle < 360 else (False,):
+                sketch_feat, how = self._draw(plane_axis, mirror, polygon=polygon, centerline=centerline)
+                exact = how == "transform"
+                self.select_only(sketch_feat)
+                try:
+                    feature = call(fm, "FeatureRevolve2", True, True, False, spec.cut, reverse, False, 0, 0,
+                                   angle, 0.0, False, False, 0.0, 0.0, 0, 0.0, 0.0, True, True, True)
+                except Exception as exc:  # noqa: BLE001
+                    log.info("revolve attempt failed: %s", exc)
+                    feature = None
+                tried.append(f"reverse={reverse} sketch={how} -> {'feature' if feature else 'none'}")
+                if feature is not None and placement_ok(expected, self._face_boxes(feature)):
+                    log.info("built %s around %s; attempts: %s", spec.label, spec.axis, "; ".join(tried))
+                    return self._finish(spec, feature, volume_before)  # type: ignore[arg-type]
+                self.delete(feature if feature is not None else sketch_feat)
+        raise SwError(Code.SW_ERROR, f"SolidWorks could not revolve this profile (tried {len(tried)} ways).",
+                      "Check that the profile does not cross the axis and, for a cut, that it overlaps the part.")
 
     # ---------------------------------------------------------------- repeats
     def last_group(self) -> list[Shape]:

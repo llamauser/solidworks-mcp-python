@@ -22,6 +22,19 @@ Geometry rules:
 - Repeats copy the last shape; a second repeat copies the whole group (a grid is two repeats).
   Around a circle: copies N-1, angle_step 360/N. Never write repeated shapes one by one.
 - Prism points are (x,y) for axis z, (x,z) for axis y, and (y,z) for axis x.
+- Round parts (pistons, shafts, pulleys, grooves): a "revolve" step. Profile points are
+  [distance from the axis, position along the axis]. The axis must lie on a default plane
+  (axis y: center x=0 or z=0; axis x: y=0 or z=0; axis z: x=0 or y=0).
+- Tilted features (V-engine cylinder banks, angled holes): add "rotate":{"axis":"z","deg":45,"about":[x,y,z]}
+  to a box, cylinder or prism. Describe the shape upright, then tilt it about the point it pivots on.
+
+MACHINES with several parts (engine, gearbox, vise, ...):
+1. Write a parts list first. Model EVERY part in the machine's own coordinates (exactly where it sits
+   in the finished machine), so nothing has to be positioned later.
+2. Build and save each part with build_part(plan, save_as="<machine>/<part>"), one part per call.
+3. When all parts are saved, call make_assembly(project="<machine>").
+4. If you lose track, list_project(project="<machine>") shows which parts are done.
+Keep each part to about 3-15 steps. The goal is a recognizable, well-proportioned model.
 
 Example: "60x40x10 plate, 6 mm hole in each corner 8 mm from the edges, corners rounded R5"
 (hole centers: 30-8=22 and 20-8=12)

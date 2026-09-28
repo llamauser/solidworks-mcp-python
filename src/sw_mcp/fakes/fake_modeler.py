@@ -53,6 +53,7 @@ class FakeSketch:
         self.plane = plane
         self.circles: list = []
         self.lines: list = []
+        self.centerline = None
 
     # no ModelToSketchTransform: the server must use its fallback table
 
@@ -83,6 +84,10 @@ class FakeSketchManager:
 
     def CreateCircleByRadius(self, x, y, z, r):
         self.ActiveSketch.circles.append(((x, y), r))
+        return object()
+
+    def CreateCenterLine(self, x1, y1, z1, x2, y2, z2):
+        self.ActiveSketch.centerline = ((x1, y1), (x2, y2))
         return object()
 
 
@@ -123,9 +128,55 @@ class FakeEdge:
         return FakeCurve()
 
 
+def _rotate(p, angles, pivot):
+    x, y, z = (p[i] - pivot[i] for i in range(3))
+    ax, ay, az = angles
+    y, z = y * math.cos(ax) - z * math.sin(ax), y * math.sin(ax) + z * math.cos(ax)
+    x, z = x * math.cos(ay) + z * math.sin(ay), -x * math.sin(ay) + z * math.cos(ay)
+    x, y = x * math.cos(az) - y * math.sin(az), x * math.sin(az) + y * math.cos(az)
+    return [x + pivot[0], y + pivot[1], z + pivot[2]]
+
+
+def _bbox(points):
+    return [min(p[i] for p in points) for i in range(3)], [max(p[i] for p in points) for i in range(3)]
+
+
+class FakeSolidBody:
+    """A separate body (created with Merge=False): tracked by its outline points (mm)."""
+
+    def __init__(self, doc: "FakePart", name: str, points: list, volume_m3: float) -> None:
+        self.doc = doc
+        self.Name = name
+        self.points = points
+        self.volume_m3 = volume_m3
+
+    def box(self):
+        return _bbox(self.points)
+
+    def GetBodyBox(self):
+        lo, hi = self.box()
+        return (*[v / 1000 for v in lo], *[v / 1000 for v in hi])
+
+    def GetMassProperties(self, density):
+        return (0.0, 0.0, 0.0, self.volume_m3, 0.0, 0.0)
+
+    def GetEdges(self):
+        return ()
+
+
 class FakeBody:
+    Name = "Body1"
+
     def __init__(self, doc: "FakePart") -> None:
         self.doc = doc
+
+    def GetBodyBox(self):
+        lo, hi = self.doc.union_box()
+        return (*[v / 1000 for v in lo], *[v / 1000 for v in hi])
+
+    def GetMassProperties(self, density):
+        extra = sum(b.volume_m3 for b in self.doc.extra_bodies)
+        return (0.0, 0.0, 0.0, self.doc.volume_m3 - extra, 0.0, 0.0)
 
     def GetEdges(self):
         lo, hi = self.doc.union_box()
@@ -157,13 +208,36 @@ class FakeExtension:
                 self.doc.volume_m3 -= getattr(feat, "volume_m3", 0.0)
                 if feat in self.doc.solids:
                     self.doc.solids.remove(feat)
+                body = getattr(feat, "body", None)
+                if body is not None and body in self.doc.extra_bodies:
+                    self.doc.extra_bodies.remove(body)
+                undo = getattr(feat, "undo", None)
+                if undo is not None:
+                    undo()
         self.doc.selected = []
         return True
 
     def SelectByID2(self, name, kind, x, y, z, append, mark, callout, option) -> bool:
         if not append:
             self.doc.selected = []
+        if kind == "SOLIDBODY":
+            for body in self.doc.extra_bodies:
+                if body.Name == name:
+                    self.doc.selected.append(body)
+                    return True
+            if name == "Body1" and self.doc.solids:
+                self.doc.selected.append(FakeBody(self.doc))
+                return True
+            return False
         self.doc.selected.append(("EDGE", (x, y, z)))
+        return True
+
+    def SaveAs(self, path, version, options, export_data, errors, warnings) -> bool:
+        with open(path, "wb") as fh:
+            fh.write(b"fake")
+        self.doc.path = path
+        errors.value = 0
+        warnings.value = 0
         return True
 
 
@@ -171,7 +245,8 @@ class FakeFeatureManager:
     def __init__(self, doc: "FakePart") -> None:
         self.doc = doc
 
-    def _extrude(self, cut: bool, reverse: bool, depth: float, t0: int, offset: float, flip_offset: bool):
+    def _extrude(self, cut: bool, reverse: bool, depth: float, t0: int, offset: float, flip_offset: bool,
+                 merge: bool = True):
         doc = self.doc
         sk_feat = doc.selected[0]
         sketch: FakeSketch = sk_feat.sketch
@@ -199,12 +274,15 @@ class FakeFeatureManager:
             a, b = conv(u, v)
             lo2, hi2 = (a - r * 1000, b - r * 1000), (a + r * 1000, b + r * 1000)
             area = math.pi * (r * 1000) ** 2
+            ring = [(a + r * 1000 * math.cos(k * math.pi / 36), b + r * 1000 * math.sin(k * math.pi / 36))
+                    for k in range(72)]
         else:
             pts = [conv(*ln[0]) for ln in sketch.lines]
             xs, ys = [p[0] for p in pts], [p[1] for p in pts]
             lo2, hi2 = (min(xs), min(ys)), (max(xs), max(ys))
             area = abs(sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1]
                            for i in range(len(pts)))) / 2
+            ring = pts
         lo, hi = [0.0] * 3, [0.0] * 3
         lo[ia], lo[ib], hi[ia], hi[ib] = lo2[0], lo2[1], hi2[0], hi2[1]
         lo[n], hi[n] = s, e
@@ -225,14 +303,123 @@ class FakeFeatureManager:
         feat.volume_m3 = -vol if cut else vol
         doc.volume_m3 += feat.volume_m3
         doc.features[doc.features.index(sk_feat)] = feat  # the sketch is absorbed
-        if not cut:
+        if not cut and not merge:
+            points = []
+            for along in (s, e):
+                for a, b in ring:
+                    pt = [0.0] * 3
+                    pt[ia], pt[ib], pt[n] = a, b, along
+                    points.append(pt)
+            doc.body_count += 1
+            feat.body = FakeSolidBody(doc, f"{feat.Name}-Body", points, vol)
+            doc.extra_bodies.append(feat.body)
+        elif not cut:
             doc.solids.append(feat)
         doc.selected = []
         return feat
 
     def FeatureExtrusion3(self, sd, flip, reverse, t1, t2, d1, d2, *rest):
-        t0, offset, flip_offset = rest[-3], rest[-2], rest[-1]
-        return self._extrude(False, reverse, d1, t0, offset, flip_offset)
+        t0, offset, flip_offset, merge = rest[-3], rest[-2], rest[-1], rest[-6]
+        return self._extrude(False, reverse, d1, t0, offset, flip_offset, merge)
+
+    def InsertMoveCopyBody2(self, tx, ty, tz, td, px, py, pz, ax, ay, az, copy, count):
+        doc = self.doc
+        bodies = [b for b in doc.selected if isinstance(b, FakeSolidBody)]
+        if not bodies:
+            return None
+        body = bodies[0]
+        old = body.points
+        k = doc.rotation_sign
+        pivot = (px * 1000, py * 1000, pz * 1000)
+        body.points = [_rotate(p, (ax * k, ay * k, az * k), pivot) for p in old]
+        doc.feature_count += 1
+        feat = FakeFeature(doc, f"Body-Move/Copy{doc.feature_count}", "MoveCopyBody")
+        feat.undo = lambda: setattr(body, "points", old)
+        doc.features.append(feat)
+        doc.selected = []
+        return feat
+
+    def InsertCombineFeature(self, op, main, tools):
+        doc = self.doc
+        tool_list = getattr(tools, "value", tools) or []
+        if not tool_list or main is None:
+            return None
+        tool = tool_list[0]
+        if tool not in doc.extra_bodies:
+            return None
+        lo, hi = tool.box()
+        doc.extra_bodies.remove(tool)
+        doc.feature_count += 1
+        feat = FakeFeature(doc, f"Combine{doc.feature_count}", "CombineBodies")
+        if op == 15903:  # add
+            feat.box = (lo, hi)
+            doc.solids.append(feat)
+        else:  # cut: the tool body disappears and takes the overlapping material with it
+            ulo, uhi = doc.union_box()
+            overlap = 1.0
+            for i in range(3):
+                span = hi[i] - lo[i]
+                inside = max(0.0, min(hi[i], uhi[i]) - max(lo[i], ulo[i]))
+                overlap *= inside / span if span > 0 else 1.0
+            feat.volume_m3 = -tool.volume_m3 * overlap
+            doc.volume_m3 += feat.volume_m3 - tool.volume_m3
+        feat.faces = [FakeBoxFace(lo, hi)]
+        doc.features.append(feat)
+        return feat
+
+    def FeatureRevolve2(self, single, solid, thin, is_cut, reverse, both, t1, t2, angle, *rest):
+        doc = self.doc
+        sk_feat = doc.selected[0]
+        sketch: FakeSketch = sk_feat.sketch
+        if sketch.centerline is None or not sketch.lines:
+            return None
+        n = PLANE_AXIS[sketch.plane]
+        ia, ib = IN_PLANE[n]
+
+        def world(u, v):
+            if doc.mirror_second_axis:
+                v = -v
+            if n == 2:
+                a, b = u * 1000, v * 1000
+            elif n == 1:
+                a, b = u * 1000, -v * 1000
+            else:
+                a, b = v * 1000, -u * 1000
+            p = [0.0] * 3
+            p[ia], p[ib] = a, b
+            return p
+
+        c1, c2 = world(*sketch.centerline[0]), world(*sketch.centerline[1])
+        ax = next(i for i in range(3) if abs(c1[i] - c2[i]) > 1e-9)
+        pts = [world(*ln[0]) for ln in sketch.lines]
+        radial = [i for i in range(3) if i not in (ax, n)][0]
+        rh = [(abs(p[radial] - c1[radial]), p[ax]) for p in pts]
+        area2 = sum(rh[i][0] * rh[(i + 1) % len(rh)][1] - rh[(i + 1) % len(rh)][0] * rh[i][1] for i in range(len(rh)))
+        area = abs(area2) / 2
+        cx = sum((rh[i][0] + rh[(i + 1) % len(rh)][0]) *
+                 (rh[i][0] * rh[(i + 1) % len(rh)][1] - rh[(i + 1) % len(rh)][0] * rh[i][1])
+                 for i in range(len(rh))) / (3 * area2) if area2 else 0.0
+        vol = angle * area * abs(cx) / 1e9
+        rmax = max(r for r, _ in rh)
+        lo, hi = [0.0] * 3, [0.0] * 3
+        for i in range(3):
+            if i == ax:
+                lo[i], hi[i] = min(h for _, h in rh), max(h for _, h in rh)
+            else:
+                lo[i], hi[i] = c1[i] - rmax, c1[i] + rmax
+        if is_cut and (not doc.solids or not doc.intersects(lo, hi)):
+            return None
+        doc.feature_count += 1
+        feat = FakeFeature(doc, f"Revolve{doc.feature_count}", "Revolution" if not is_cut else "RevCut")
+        feat.faces = [FakeBoxFace(lo, hi)]
+        feat.box = (lo, hi)
+        feat.volume_m3 = -vol if is_cut else vol
+        doc.volume_m3 += feat.volume_m3
+        doc.features[doc.features.index(sk_feat)] = feat
+        if not is_cut:
+            doc.solids.append(feat)
+        doc.selected = []
+        return feat
 
     def FeatureCut4(self, sd, flip, reverse, t1, t2, d1, d2, *rest):
         t0, offset, flip_offset = rest[-4], rest[-3], rest[-2]
@@ -272,6 +459,10 @@ class FakePart:
         self.feature_count = 0
         self.reverse_convention = False
         self.mirror_second_axis = False
+        self.rotation_sign = 1.0  # -1 makes the fake rotate the other way than the server expects
+        self.extra_bodies: list = []
+        self.body_count = 1
+        self.path = ""
         self.max_fillet_m = 1.0
         self.fillet_edges: list = []
 
@@ -283,7 +474,7 @@ class FakePart:
         return 1
 
     def GetPathName(self) -> str:
-        return ""
+        return self.path
 
     def FirstFeature(self):
         return self.features[0]
@@ -301,6 +492,8 @@ class FakePart:
         pass
 
     def union_box(self):
+        if not self.solids and self.extra_bodies:
+            return _bbox([p for b in self.extra_bodies for p in b.points])
         los = [f.box[0] for f in self.solids]
         his = [f.box[1] for f in self.solids]
         return [min(v[i] for v in los) for i in range(3)], [max(v[i] for v in his) for i in range(3)]
@@ -319,7 +512,67 @@ class FakePart:
         return (*[v / 1000 for v in lo], *[v / 1000 for v in hi])
 
     def GetBodies2(self, kind: int, visible: bool):
-        return (FakeBody(self),) if self.solids else None
+        main = (FakeBody(self),) if self.solids else ()
+        return (main + tuple(self.extra_bodies)) or None
+
+
+class FakeComponent2:
+    def __init__(self, part: FakePart, offset) -> None:
+        self.part = part
+        self.Name2 = f"{part.title.rsplit('.', 1)[0]}-1"
+        self.offset = offset
+
+    def GetBox(self, include_hidden, include_refs):
+        lo, hi = self.part.union_box()
+        return (*[(lo[i] + self.offset[i]) / 1000 for i in range(3)], *[(hi[i] + self.offset[i]) / 1000 for i in range(3)])
+
+
+class FakeAssemblyExtension:
+    def __init__(self, asm: "FakeAssembly") -> None:
+        self.asm = asm
+
+    def SaveAs(self, path, version, options, export_data, errors, warnings) -> bool:
+        with open(path, "wb") as fh:
+            fh.write(b"fake assembly")
+        self.asm.path = path
+        errors.value = 0
+        warnings.value = 0
+        return True
+
+
+class FakeAssembly:
+    def __init__(self, app, title: str) -> None:
+        self.app = app
+        self.title = title
+        self.path = ""
+        self.components: list[FakeComponent2] = []
+        self.Extension = FakeAssemblyExtension(self)
+
+    def GetTitle(self) -> str:
+        return self.title
+
+    def GetType(self) -> int:
+        return 2
+
+    def GetPathName(self) -> str:
+        return self.path
+
+    def AddComponent5(self, path, config_option, new_config, use_config, existing_config, x, y, z):
+        part = self.app.GetOpenDocumentByName(path)
+        if part is None:
+            return None
+        comp = FakeComponent2(part, self.app.component_offset)
+        self.components.append(comp)
+        return comp
+
+    def GetBox(self, options):
+        boxes = [c.GetBox(False, False) for c in self.components]
+        if not boxes:
+            return None
+        return (*[min(b[i] for b in boxes) for i in range(3)], *[max(b[i + 3] for b in boxes) for i in range(3)])
+
+    def ViewZoomtofit2(self) -> None:
+        pass
 
 
 def make_modeling_app():
@@ -333,13 +586,26 @@ def make_modeling_app():
     app.created = []
     app.closed = []
 
+    app.component_offset = (0.0, 0.0, 0.0)
+
     def new_document(template, paper, width, height):
-        doc = FakePart(f"Part{len(app.created) + 1}")
+        if template.lower().endswith(".asmdot"):
+            doc = FakeAssembly(app, f"Assem{len(app.created) + 1}")
+        else:
+            doc = FakePart(f"Part{len(app.created) + 1}")
         app.created.append(doc)
         app.ActiveDoc = doc
         return doc
 
-    app.GetUserPreferenceStringValue = lambda index: r"C:\templates\part.prtdot"
+    def open_by_name(path):
+        for doc in app.created:
+            if getattr(doc, "path", "") and doc.path.lower() == str(path).lower():
+                return doc
+        return None
+
+    app.GetUserPreferenceStringValue = lambda index: (r"C:\templates\assembly.asmdot" if index == 9
+                                                      else r"C:\templates\part.prtdot")
     app.NewDocument = new_document
+    app.GetOpenDocumentByName = open_by_name
     app.CloseDoc = lambda title: app.closed.append(title)
     return app

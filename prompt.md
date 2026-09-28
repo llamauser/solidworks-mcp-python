@@ -206,7 +206,21 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - The score (0-100, pass %) is saved into ModelEntry.score, so the router prefers high scores. A rate-limited model counts as skipped, not failed. It estimates the requests and asks to confirm first.
   - The fake now clips cut length to the solid extent along the axis (like SolidWorks; matches the real -282.7 mm³ for a through hole).
   - 130 tests pass.
-- [ ] P5 next: geometry (rotate steps via move/copy body + combine, revolve, build_part save_as into a project folder, make_assembly at origin, list_project, big-job guide).
+- [x] **P5 done** (UNVERIFIED on real SolidWorks: the smoke test has new checks for it):
+  - **Tilt:** `"rotate": {"axis","deg","about"}` on box/cylinder/prism. `Shape.tilt` → `Modeler.build_tilted`:
+    - `_place(merge=False)` makes a separate body;
+    - `_rotate_body`: SelectByID2(name, "SOLIDBODY", mark 1) + `InsertMoveCopyBody2(0,0,0,0, pivot, angX, angY, angZ, False, 1)`, verified against `tilted_box()`, retried with the opposite sign;
+    - `_combine`: `InsertCombineFeature(15902 cut / 15903 add, main, VARIANT[tool])`, with a selection-based fallback;
+    - rollback on failure.
+    Row repeats move the pivot; repeat_around of tilted shapes is rejected.
+  - **Revolve:** `Revolve` spec + `Modeler.revolve`. It draws the profile + `CreateCenterLine` on the default plane containing the axis (the axis must lie on a default plane), then `FeatureRevolve2` (C# argument order, IsCut for cut) with a placement check. `_draw()` is now the generic sketch helper.
+  - **Projects:** `src/sw_mcp/sw/project.py`. The root is `SW_MCP_PROJECTS` or `~/Documents/SolidWorks Assistant`. `build_part(save_as="project/part")`, plus the tools `make_assembly(project, parts, name)` and `list_project(project)`.
+    - Assembly: template pref 9 → NewDocument; the parts are opened first; `AddComponent5(path,0,"",False,"",0,0,0)` with an AddComponent4 fallback.
+    - Each component box is compared with the part box; if it's off, the tool moves it via `Transform2` + `MathUtility.CreateTransform`, and otherwise warns.
+  - **Guide:** now has round parts, tilted features and a MACHINES workflow. The build_part docstring covers revolve and rotate.
+  - **Fakes:** separate bodies, move/copy (knob `rotation_sign`), combine, revolve (Pappus), assemblies (knob `component_offset`), SaveAs.
+  - 145 tests pass.
+- [ ] P6 next: browser UI (`sw-agent web`), one-click installer .bat + desktop shortcut, simple docs (docs/GETTING_STARTED.md).
 
 **Plan:**
 - **P1 Plan-as-data:** the LLM writes the whole part as one JSON plan (the existing primitives). The server validates it with pydantic and executes it deterministically with verification, with a repair loop on errors. This takes about 2–5 LLM requests per part instead of about 30, and makes weak or free models viable. It lives in sw_mcp, so all clients benefit.

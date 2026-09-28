@@ -126,8 +126,10 @@ async def run(args) -> None:
     record("SolidWorks registered", "PASS" if exe else "FAIL", exe or "SldWorks.Application is not registered")
     record("SolidWorks processes", "INFO", str(connection.solidworks_pids()) or "none")
 
+    projects = tempfile.mkdtemp(prefix="sw_mcp_projects_")  # never touch the user's real projects
     server = StdioServerParameters(command=sys.executable, args=["-m", "sw_mcp"], cwd=ROOT,
-                                   env={**os.environ, "PYTHONPATH": os.path.join(ROOT, "src")})
+                                   env={**os.environ, "PYTHONPATH": os.path.join(ROOT, "src"),
+                                        "SW_MCP_PROJECTS": projects})
     started = time.monotonic()
     async with Client(server, read_timeout_seconds=180) as client:
         names = sorted(t.name for t in (await client.list_tools()).tools)
@@ -325,6 +327,27 @@ async def build_checks(client: Client, work: str) -> None:
                      plan='{"steps":[{"op":"cylinder","start":[0,0,0],"end":[5,5,0],"diameter":3}]}')
     rejected = bad.get("error") == "BAD_ARGUMENT" and "Step 1 (cylinder)" in bad.get("message", "")
     record("build: build_part rejects a bad plan before building", "PASS" if rejected else "FAIL", short(bad, 400))
+
+    # Phase 5 geometry: tilted features, revolve, a project with an assembly.
+    block = {"op": "box", "x": [-60, 60], "y": [0, 50], "z": [-30, 30]}
+    tilted = {"steps": [block, {"op": "cylinder", "mode": "cut", "start": [0, 20, 0], "end": [0, 120, 0],
+                                "diameter": 30, "rotate": {"axis": "z", "deg": 45, "about": [0, 20, 0]}}]}
+    await step("tilted bore (45 deg) cut into a block", "build_part",
+               lambda o: o.get("bodies") == 1 and 360000 - 45000 < o.get("volume_mm3", 0) < 360000 - 20000,
+               plan=json.dumps(tilted))
+    disc = {"steps": [{"op": "revolve", "axis": "y", "profile": [[0, 0], [20, 0], [20, 10], [0, 10]]}]}
+    await step("revolve a disc d40 x 10", "build_part",
+               lambda o: abs(o.get("volume_mm3", 0) - 12566.4) < 130 and o.get("size_mm") == [40.0, 10.0, 40.0],
+               plan=json.dumps(disc))
+    await step("project: save part 'block'", "build_part", lambda o: bool(o.get("saved_as")),
+               plan=json.dumps({"steps": [block]}), save_as="Smoke/block")
+    pin = {"steps": [{"op": "cylinder", "start": [0, 50, 0], "end": [0, 90, 0], "diameter": 10}]}
+    await step("project: save part 'pin' (sits on the block)", "build_part", lambda o: bool(o.get("saved_as")),
+               plan=json.dumps(pin), save_as="Smoke/pin")
+    await step("make_assembly puts both parts where they were designed", "make_assembly",
+               lambda o: o.get("components") == ["block", "pin"] and not o.get("warnings")
+               and o.get("size_mm") == [120.0, 90.0, 60.0],
+               project="Smoke", name="Smoke assembly")
 
 
 def write_report() -> None:

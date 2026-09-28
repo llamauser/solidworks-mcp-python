@@ -14,8 +14,8 @@ from sw_mcp.server import create_server
 PRIMITIVES = {"string", "number", "integer", "boolean"}
 MAX_PARAMS = 8  # geometry needs up to 8 plain numbers (two 3D points + diameter); still flat
 MAX_DESCRIPTION_CHARS = 900  # per tool docstring
-LONG_DESCRIPTION_TOOLS = {"build_part": 1400}  # carries the whole plan format
-MAX_TOTAL_SCHEMA_CHARS = 14500  # the whole tools/list payload the model must read each turn
+LONG_DESCRIPTION_TOOLS = {"build_part": 1900}  # carries the whole plan format
+MAX_TOTAL_SCHEMA_CHARS = 16500  # the whole tools/list payload the model must read each turn
 
 
 async def _list_tools():
@@ -32,7 +32,7 @@ def test_all_tools_present(tools):
     assert {t.name for t in tools} == {
         "get_status", "open_document", "get_selection_context", "set_dimension", "save_document",
         "new_part", "make_box", "make_cylinder", "make_prism", "finish_edges", "undo_last_feature",
-        "repeat_last_shape", "repeat_last_shape_around", "build_part",
+        "repeat_last_shape", "repeat_last_shape_around", "build_part", "make_assembly", "list_project",
         "get_model_summary",
     }
 

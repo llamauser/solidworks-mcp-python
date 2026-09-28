@@ -71,7 +71,7 @@ def test_not_json():
      "Step 1 (repeat) has nothing to repeat"),
     ([{"op": "box", "x": [0, 1], "y": [0, 1], "z": [0, 1]}, {"op": "repeat", "copies": 2, "step": [0, 0, 0]}],
      "zero step"),
-    ([{"op": "fillet", "size": 1, "edges": "all"}], "no box, cylinder or prism"),
+    ([{"op": "fillet", "size": 1, "edges": "all"}], "no box, cylinder, prism or revolve"),
 ])
 def test_dry_run_catches_geometry_mistakes(steps, expected):
     with pytest.raises(SwError) as info:
