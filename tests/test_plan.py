@@ -66,7 +66,7 @@ def test_not_json():
 
 @pytest.mark.parametrize("steps, expected", [
     ([{"op": "box", "x": [0, 1], "y": [0, 1], "z": [0, 1]},
-      {"op": "cylinder", "start": [0, 0, 0], "end": [3, 5, 0], "diameter": 2}], "Step 2 (cylinder)"),
+      {"op": "cylinder", "start": [0, 0, 0], "end": [3, 5, 1], "diameter": 2}], "Step 2 (cylinder)"),
     ([{"op": "repeat", "copies": 2, "step": [1, 0, 0]}, {"op": "box", "x": [0, 1], "y": [0, 1], "z": [0, 1]}],
      "Step 1 (repeat) has nothing to repeat"),
     ([{"op": "box", "x": [0, 1], "y": [0, 1], "z": [0, 1]}, {"op": "repeat", "copies": 2, "step": [0, 0, 0]}],
@@ -129,7 +129,7 @@ def test_failure_names_step_and_progress_then_cleans_up(app):
 
 
 def test_invalid_plan_never_touches_solidworks(app):
-    out = parse(build_part(plan='{"steps":[{"op":"cylinder","start":[0,0,0],"end":[1,1,0],"diameter":3}]}'))
+    out = parse(build_part(plan='{"steps":[{"op":"cylinder","start":[0,0,0],"end":[1,1,1],"diameter":3}]}'))
     assert out["error"] == Code.BAD_ARGUMENT and "Step 1 (cylinder)" in out["message"]
     assert app.ActiveDoc is None  # no part was even created
 

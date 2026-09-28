@@ -42,6 +42,9 @@ FALLBACK_TO_SKETCH = {
 
 TOL_MM = 0.05
 MAX_SIZE_MM = 100_000.0
+# InsertMoveCopyBody2's three rotation angles, as slot index per axis. Measured on SOLIDWORKS 2024:
+# the slots turn about Z, Y, X (asking X turned about Z). The documented order is the fallback.
+ANGLE_SLOTS = ({"x": 2, "y": 1, "z": 0}, {"x": 0, "y": 1, "z": 2})
 SYSTEM_FEATURE_TYPES = {
     "CommentsFolder", "FavoriteFolder", "HistoryFolder", "SelectionSetFolder", "SensorFolder",
     "LiveSectionFolder", "DocsFolder", "DetailCabinet", "EnvFolder", "InkMarkupFolder", "EqnFolder",
@@ -135,14 +138,19 @@ def cylinder_shape(x1: float, y1: float, z1: float, x2: float, y2: float, z2: fl
                    diameter: float, cut: bool) -> Shape:
     p1, p2 = (x1, y1, z1), (x2, y2, z2)
     differ = [i for i in range(3) if abs(p1[i] - p2[i]) > 1e-6]
-    if len(differ) != 1:
-        raise _bad(
-            "A cylinder must run straight along X, Y or Z: exactly one coordinate may differ between start and end.",
-            "Example for a vertical hole through a 10 mm plate at x=20, z=5: "
-            "start (20, 0, 5) and end (20, 10, 5).",
-        )
     if not (0.001 <= diameter <= MAX_SIZE_MM):
         raise _bad(f"diameter {diameter} is out of range.", "Use a positive diameter in millimeters.")
+    if not differ:
+        raise _bad("The cylinder's start and end are the same point.",
+                   "The end must be the other end of the cylinder, e.g. start (0,0,0) and end (0,50,0).")
+    if len(differ) == 3:
+        raise _bad(
+            "A slanted cylinder must keep one coordinate the same at both ends (it lies in a plane "
+            "parallel to Front, Top or Right).",
+            "Example of a 45 degree bore in the Y-Z plane: start (0, 0, 0) and end (0, 70.7, 70.7).",
+        )
+    if len(differ) == 2:
+        return _slanted_cylinder(p1, p2, diameter, cut)
     n = differ[0]
     axis = "xyz"[n]
     ia, ib = IN_PLANE[axis]
@@ -150,6 +158,22 @@ def cylinder_shape(x1: float, y1: float, z1: float, x2: float, y2: float, z2: fl
     _check_range(axis, start, end)
     prof = Profile("circle", [(p1[ia], p1[ib])], diameter / 2.0)
     return Shape(axis, prof, start, end, cut, "Hole" if cut else "Cylinder")
+
+
+def _slanted_cylinder(p1: tuple, p2: tuple, diameter: float, cut: bool) -> Shape:
+    """A cylinder from p1 to p2 lying in a plane parallel to a default plane: built straight
+    along a base axis from p1, then tilted about p1 into the requested direction."""
+    d = [p2[i] - p1[i] for i in range(3)]
+    k = next(i for i in range(3) if abs(d[i]) <= 1e-6)  # the tilt axis (the unchanged coordinate)
+    b, o = (k + 1) % 3, (k + 2) % 3  # base axis x->y, y->z, z->x keeps the right-hand rule simple
+    length = math.sqrt(sum(c * c for c in d))
+    base = "xyz"[b]
+    ia, ib = IN_PLANE[base]
+    _check_range(base, p1[b], p1[b] + length)
+    prof = Profile("circle", [(p1[ia], p1[ib])], diameter / 2.0)
+    deg = math.degrees(math.atan2(d[o], d[b]))
+    return Shape(base, prof, p1[b], p1[b] + length, cut, "Hole" if cut else "Cylinder",
+                 ("xyz"[k], deg, (float(p1[0]), float(p1[1]), float(p1[2]))))
 
 
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
@@ -281,11 +305,23 @@ class Revolve:
         for normal, radial in options[self.axis]:
             if abs(self.center[AXIS_INDEX[normal]]) < 1e-6:
                 return normal, radial
-        raise _bad(
-            f"A revolve around {self.axis.upper()} needs its axis on a default plane.",
-            {"y": "Set center x=0 or z=0.", "x": "Set center y=0 or z=0.", "z": "Set center x=0 or y=0."}[self.axis]
-            + " Build the round part at the origin; other parts can be positioned around it.",
-        )
+        raise _bad(f"A revolve around {self.axis.upper()} here needs its axis on a default plane.",
+                   "Use shifted() first.")
+
+    def shifted(self) -> tuple["Revolve", list[float]]:
+        """The same revolve moved so its axis lies on a default plane, and the offset (mm) that
+        moves it back. SolidWorks can only sketch on the default planes here, so an off-plane
+        revolve is built there as a separate body and then moved into place."""
+        try:
+            self.sketch_plane()
+            return self, [0.0, 0.0, 0.0]
+        except SwError:
+            pass
+        n = AXIS_INDEX[{"y": "z", "x": "z", "z": "y"}[self.axis]]
+        center = list(self.center)
+        offset = [0.0, 0.0, 0.0]
+        offset[n], center[n] = center[n], 0.0
+        return Revolve(self.axis, tuple(center), self.profile, self.angle, self.cut, self.label), offset
 
 
 def revolve_spec(axis: str, center: tuple, profile: list[tuple[float, float]], angle: float, cut: bool) -> Revolve:
@@ -302,10 +338,8 @@ def revolve_spec(axis: str, center: tuple, profile: list[tuple[float, float]], a
         raise _bad("The revolve profile does not enclose an area.", "List the corners in order around the outline.")
     if not 0 < angle <= 360:
         raise _bad("The revolve angle must be between 0 and 360 degrees.", "Use 360 for a full round part.")
-    spec = Revolve(axis, tuple(float(c) for c in center), pts, float(angle), cut,
+    return Revolve(axis, tuple(float(c) for c in center), pts, float(angle), cut,
                    "Cut-Revolve" if cut else "Revolve")
-    spec.sketch_plane()  # validates that the axis lies on a default plane
-    return spec
 
 
 def placement_ok(shape: Shape, face_boxes_mm: list[tuple[list[float], list[float]]], tol: float = TOL_MM) -> bool:
@@ -705,30 +739,54 @@ class Modeler:
         new = [n for n in self._body_names() if n not in before]
         return new[0] if len(new) == 1 else None
 
-    def _rotate_body(self, before: list[str], shape: Shape) -> tuple[Any, str]:
-        axis, deg, about = shape.tilt  # type: ignore[misc]
-        expected = tilted_box(shape)
+    def _move_body(self, before: list[str], attempts: list[tuple[str, tuple]],
+                   expected: tuple[list[float], list[float]], what: str) -> tuple[Any, str]:
+        """Move the one new body with Move/Copy Body, trying argument sets until its box lands on
+        `expected`. Each attempt is (label, the 10 numbers before bCopy)."""
         fm = call(self.doc, "FeatureManager")
-        for sign in (1.0, -1.0):  # right-hand rule first; the other sign if this SolidWorks disagrees
+        for label, numbers in attempts:
             name = self._tool_body_name(before)
             if name is None:
-                raise SwError(Code.SW_ERROR, "Lost track of the tilted shape's body.", "Build it without rotate.")
+                raise SwError(Code.SW_ERROR, f"Lost track of the {what} shape's body.", "Try the step again.")
             call(self.doc, "ClearSelection2", True)
             if not self._select_body(name, False, 1):
-                raise SwError(Code.SW_ERROR, "SolidWorks could not select the new body to tilt it.", "Try again.")
-            angles = [0.0, 0.0, 0.0]
-            angles[AXIS_INDEX[axis]] = math.radians(deg) * sign
-            feature = call(fm, "InsertMoveCopyBody2", 0.0, 0.0, 0.0, 0.0,
-                           about[0] / 1000, about[1] / 1000, about[2] / 1000, *angles, False, 1)
+                raise SwError(Code.SW_ERROR, f"SolidWorks could not select the new body to {what} it.", "Try again.")
+            try:
+                feature = call(fm, "InsertMoveCopyBody2", *numbers, False, 1)
+            except Exception as exc:  # noqa: BLE001 - a refused argument set is just a failed attempt
+                log.info("move body (%s) refused: %s", label, exc)
+                feature = None
             moved = self._tool_body_name(before)
             box = self._body_box(moved) if moved else None
-            log.info("tilt sign=%s: feature=%s body %s -> %s, box %s, expected %s", sign, feature is not None,
+            log.info("%s %s: feature=%s body %s -> %s, box %s, expected %s", what, label, feature is not None,
                      name, moved, box, expected)
             if feature is not None and box is not None and boxes_match(box, expected):
                 return feature, moved  # type: ignore[return-value]
             self.delete(feature)
-        raise SwError(Code.SW_ERROR, "SolidWorks did not tilt the shape as expected.",
-                      "Check the rotate axis and angle; or build the shape without rotate.")
+        raise SwError(Code.SW_ERROR, f"SolidWorks did not {what} the shape as expected.",
+                      "Build the shape without it, or tell the user this SolidWorks version is not supported yet.")
+
+    def _rotate_body(self, before: list[str], shape: Shape) -> tuple[Any, str]:
+        axis, deg, about = shape.tilt  # type: ignore[misc]
+        pivot = (about[0] / 1000, about[1] / 1000, about[2] / 1000)
+        attempts: list[tuple[str, tuple]] = []
+        for order in ANGLE_SLOTS:
+            for sign in (1.0, -1.0):
+                angles = [0.0, 0.0, 0.0]
+                angles[order[axis]] = math.radians(deg) * sign
+                label = f"tilt slot={order[axis]} sign={sign:+g}"
+                if all(a[0] != label for a in attempts):
+                    attempts.append((label, (0.0, 0.0, 0.0, 0.0, *pivot, *angles)))
+        return self._move_body(before, attempts, tilted_box(shape), "tilt")
+
+    def _translate_body(self, before: list[str], offset: list[float],
+                        expected: tuple[list[float], list[float]]) -> tuple[Any, str]:
+        d = [v / 1000 for v in offset]
+        dist = math.sqrt(sum(v * v for v in d))
+        unit = [v / dist for v in d]
+        attempts = [("shift xyz", (*d, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
+                    ("shift direction+distance", (*unit, dist, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))]
+        return self._move_body(before, attempts, expected, "move")
 
     def _combine(self, main: str, tool: str, cut: bool) -> Any:
         fm = call(self.doc, "FeatureManager")
@@ -785,7 +843,40 @@ class Modeler:
 
     # ---------------------------------------------------------------- revolve
     def revolve(self, spec: Revolve) -> dict:
+        placed, offset = spec.shifted()
+        if any(abs(v) > 1e-9 for v in offset):
+            return self._revolve_moved(spec, placed, offset)
         volume_before = self.volume_mm3()
+        feature = self._revolve_feature(spec, merge=True)
+        return self._finish(spec, feature, volume_before)  # type: ignore[arg-type]
+
+    def _revolve_moved(self, spec: Revolve, placed: Revolve, offset: list[float]) -> dict:
+        """Off-plane axis: revolve a separate body on a default plane, move it, then join or cut."""
+        volume_before = self.volume_mm3()
+        before = self._body_names()
+        if spec.cut and not before:
+            raise _bad("A revolved cut needs a part to cut from.", "Build the base body first.")
+        tool = Revolve(placed.axis, placed.center, placed.profile, placed.angle, False, placed.label)
+        created: list[Any] = []
+        try:
+            created.append(self._revolve_feature(tool, merge=False))
+            made = self._tool_body_name(before)
+            box = self._body_box(made) if made else None
+            if box is None:
+                raise SwError(Code.SW_ERROR, "SolidWorks did not make the revolve as a separate body.",
+                              "Put the revolve axis on the Front, Top or Right plane (a center coordinate of 0).")
+            expected = ([box[0][i] + offset[i] for i in range(3)], [box[1][i] + offset[i] for i in range(3)])
+            move, tool_name = self._translate_body(before, offset, expected)
+            created.append(move)
+            if before:
+                created.append(self._combine(self._main_body(before), tool_name, spec.cut))
+        except BaseException:
+            for feature in reversed(created):
+                self.delete(feature)
+            raise
+        return self._finish(spec, created[-1], volume_before)  # type: ignore[arg-type]
+
+    def _revolve_feature(self, spec: Revolve, merge: bool) -> Any:
         plane_axis, radial = spec.sketch_plane()
         polygon = [spec.world(r, h, radial) for r, h in spec.profile]
         hs = [h for _, h in spec.profile]
@@ -804,14 +895,14 @@ class Modeler:
                 self.select_only(sketch_feat)
                 try:
                     feature = call(fm, "FeatureRevolve2", True, True, False, spec.cut, reverse, False, 0, 0,
-                                   angle, 0.0, False, False, 0.0, 0.0, 0, 0.0, 0.0, True, True, True)
+                                   angle, 0.0, False, False, 0.0, 0.0, 0, 0.0, 0.0, merge, True, True)
                 except Exception as exc:  # noqa: BLE001
                     log.info("revolve attempt failed: %s", exc)
                     feature = None
                 tried.append(f"reverse={reverse} sketch={how} -> {'feature' if feature else 'none'}")
                 if feature is not None and placement_ok(expected, self._face_boxes(feature)):
                     log.info("built %s around %s; attempts: %s", spec.label, spec.axis, "; ".join(tried))
-                    return self._finish(spec, feature, volume_before)  # type: ignore[arg-type]
+                    return feature
                 self.delete(feature if feature is not None else sketch_feat)
         raise SwError(Code.SW_ERROR, f"SolidWorks could not revolve this profile (tried {len(tried)} ways).",
                       "Check that the profile does not cross the axis and, for a cut, that it overlaps the part.")

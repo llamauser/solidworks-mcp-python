@@ -29,8 +29,26 @@ def test_cylinder_shape_axis_and_errors():
     assert s.axis == "y" and (s.start, s.end) == (-1, 11) and s.label == "Hole"
     assert s.profile.points == [(20, -10)] and s.profile.radius == 3
     with pytest.raises(SwError) as info:
-        m.cylinder_shape(0, 0, 0, 10, 10, 0, 5, cut=False)
-    assert "exactly one coordinate" in info.value.message
+        m.cylinder_shape(0, 0, 0, 10, 10, 10, 5, cut=False)
+    assert "keep one coordinate the same" in info.value.message
+    with pytest.raises(SwError):
+        m.cylinder_shape(1, 2, 3, 1, 2, 3, 5, cut=False)
+
+
+@pytest.mark.parametrize("start,end", [
+    ((0, 0, 0), (0, 70.71, 70.71)),      # tilted about X
+    ((10, 20, 5), (40, 20, -35)),        # about Y
+    ((-5, 3, 7), (-45, 43, 7)),          # about Z
+    ((0, 55, 0), (0, 55 - 60, 60)),      # pointing down and forward
+])
+def test_slanted_cylinder_lands_between_start_and_end(start, end):
+    s = m.cylinder_shape(*start, *end, 10, cut=False)
+    assert s.tilt is not None
+    axis, deg, about = s.tilt
+    base_start = s.world_point(*s.profile.points[0], s.start)
+    base_end = s.world_point(*s.profile.points[0], s.end)
+    assert [round(v, 6) for v in m.rotate_point(base_start, axis, deg, about)] == [round(v, 6) for v in map(float, start)]
+    assert [round(v, 4) for v in m.rotate_point(base_end, axis, deg, about)] == [round(v, 4) for v in map(float, end)]
 
 
 def test_parse_points_is_forgiving():
@@ -146,7 +164,7 @@ def test_cylinder_needs_part(fake_app):
 
 def test_bad_arguments_never_touch_solidworks(part):
     out = parse(make_cylinder(mode="add", start_x_mm=0, start_y_mm=0, start_z_mm=0,
-                              end_x_mm=5, end_y_mm=10, end_z_mm=0, diameter_mm=5))
+                              end_x_mm=5, end_y_mm=10, end_z_mm=5, diameter_mm=5))
     assert out["error"] == Code.BAD_ARGUMENT and part.sketch_count == 0
 
 

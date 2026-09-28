@@ -166,18 +166,29 @@ class FakeSolidBody:
 
 
 class FakeBody:
-    Name = "Body1"
+    """The part's merged solid. With `group` (feature boxes that touch), one of several pieces."""
 
-    def __init__(self, doc: "FakePart") -> None:
+    def __init__(self, doc: "FakePart", group: list | None = None, index: int = 1) -> None:
         self.doc = doc
+        self.group = group
+        self.Name = f"Body{index}"
+
+    def _box(self):
+        if self.group is None:
+            return self.doc.union_box()
+        return _bbox([corner for f in self.group for corner in f.box])
 
     def GetBodyBox(self):
-        lo, hi = self.doc.union_box()
+        lo, hi = self._box()
         return (*[v / 1000 for v in lo], *[v / 1000 for v in hi])
 
     def GetMassProperties(self, density):
         extra = sum(b.volume_m3 for b in self.doc.extra_bodies)
-        return (0.0, 0.0, 0.0, self.doc.volume_m3 - extra, 0.0, 0.0)
+        total = self.doc.volume_m3 - extra
+        if self.group is not None and len(self.doc.pieces()) > 1:  # split by box volume
+            lo, hi = self._box()
+            total = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]) / 1e9
+        return (0.0, 0.0, 0.0, total, 0.0, 0.0)
 
     def GetEdges(self):
         lo, hi = self.doc.union_box()
@@ -209,6 +220,7 @@ class FakeExtension:
                 self.doc.volume_m3 -= getattr(feat, "volume_m3", 0.0)
                 if feat in self.doc.solids:
                     self.doc.solids.remove(feat)
+                self.doc.cylinders = [c for c in self.doc.cylinders if c["feature"] is not feat]
                 body = getattr(feat, "body", None)
                 if body is not None and body in self.doc.extra_bodies:
                     self.doc.extra_bodies.remove(body)
@@ -301,8 +313,9 @@ class FakeFeatureManager:
             center[ia], center[ib] = a, b
             axis_vec = [0.0] * 3
             axis_vec[n] = 1.0
-            doc.cylinders.append({"center": center, "axis": axis_vec, "radius": r * 1000, "s": s, "e": e,
-                                  "feature": feat})
+            p0, p1 = list(center), list(center)
+            p0[n], p1[n] = s, e
+            doc.cylinders.append({"p0": p0, "p1": p1, "radius": r * 1000, "feature": feat})
         length = e - s
         if cut:
             # Like SolidWorks, a cut only removes material that is there: clip its length along
@@ -341,7 +354,17 @@ class FakeFeatureManager:
         old = body.points
         k = doc.rotation_sign
         pivot = (px * 1000, py * 1000, pz * 1000)
-        body.points = [_rotate(p, (ax * k, ay * k, az * k), pivot) for p in old]
+        # Like SOLIDWORKS 2024 (measured): the three angle slots turn about Z, Y and X.
+        about_x, about_y, about_z = (ax, ay, az) if doc.documented_angle_order else (az, ay, ax)
+        shift = [tx * 1000, ty * 1000, tz * 1000] if not td else [0.0, 0.0, 0.0]
+        def move(p):
+            return [c + s for c, s in zip(_rotate(p, (about_x * k, about_y * k, about_z * k), pivot), shift)]
+
+        body.points = [move(p) for p in old]
+        cyls = [c for c in doc.cylinders if getattr(c["feature"], "body", None) is body]
+        old_ends = [(c["p0"], c["p1"]) for c in cyls]
+        for c in cyls:
+            c["p0"], c["p1"] = move(c["p0"]), move(c["p1"])
         doc.feature_count += 1
         feat = FakeFeature(doc, f"Body-Move/Copy{doc.feature_count}", "MoveCopyBody")
         old_name = body.Name
@@ -350,6 +373,8 @@ class FakeFeatureManager:
         def undo() -> None:
             body.points = old
             body.Name = old_name
+            for c, (p0, p1) in zip(cyls, old_ends):
+                c["p0"], c["p1"] = p0, p1
 
         feat.undo = undo
         doc.features.append(feat)
@@ -426,6 +451,7 @@ class FakeFeatureManager:
                 lo[i], hi[i] = c1[i] - rmax, c1[i] + rmax
         if is_cut and (not doc.solids or not doc.intersects(lo, hi)):
             return None
+        merge = rest[-3] if len(rest) >= 3 else True
         doc.feature_count += 1
         feat = FakeFeature(doc, f"Revolve{doc.feature_count}", "Revolution" if not is_cut else "RevCut")
         feat.faces = [FakeBoxFace(lo, hi)]
@@ -433,7 +459,20 @@ class FakeFeatureManager:
         feat.volume_m3 = -vol if is_cut else vol
         doc.volume_m3 += feat.volume_m3
         doc.features[doc.features.index(sk_feat)] = feat
-        if not is_cut:
+        if not is_cut and not merge:
+            others = [i for i in range(3) if i != ax]
+            points = []
+            for _, h in rh:
+                for i0 in (0, 1):
+                    for sgn in (-1.0, 1.0):
+                        p = [0.0] * 3
+                        p[ax] = h
+                        p[others[1 - i0]] = c1[others[1 - i0]]
+                        p[others[i0]] = c1[others[i0]] + sgn * rmax
+                        points.append(p)
+            feat.body = FakeSolidBody(doc, f"{feat.Name}-Body", points, vol)
+            doc.extra_bodies.append(feat.body)
+        elif not is_cut:
             doc.solids.append(feat)
         doc.selected = []
         return feat
@@ -482,8 +521,9 @@ class FakePart:
         self.reverse_convention = False
         self.mirror_second_axis = False
         self.rotation_sign = 1.0  # -1 makes the fake rotate the other way than the server expects
+        self.documented_angle_order = False  # True: Move/Copy angle slots in the documented X, Y, Z order
         self.broken_bosses = False  # True: bosses come out with no faces (zero-thickness contact)
-        self.cylinders: list = []  # {"center", "axis", "radius", "s", "e"} in mm, for assembly joints
+        self.cylinders: list = []  # {"p0", "p1" (axis end points), "radius"} in mm, for assembly joints
         self.extra_bodies: list = []
         self.body_count = 1
         self.path = ""
@@ -535,9 +575,28 @@ class FakePart:
         lo, hi = self.union_box()
         return (*[v / 1000 for v in lo], *[v / 1000 for v in hi])
 
+    def pieces(self) -> list[list]:
+        """Solid features grouped by touching boxes (a face contact joins, a gap separates)."""
+        groups: list[list] = []
+        for f in self.solids:
+            joined = [g for g in groups if any(_touch(f.box, h.box) for h in g)]
+            merged = [f] + [h for g in joined for h in g]
+            groups = [g for g in groups if g not in joined] + [merged]
+        return groups
+
     def GetBodies2(self, kind: int, visible: bool):
-        main = (FakeBody(self),) if self.solids else ()
+        groups = self.pieces()
+        if len(groups) <= 1:
+            main = (FakeBody(self),) if self.solids else ()
+        else:
+            main = tuple(FakeBody(self, g, i) for i, g in enumerate(groups, 1))
         return (main + tuple(self.extra_bodies)) or None
+
+
+def _touch(a, b, tol: float = 1e-6) -> bool:
+    """Boxes overlap, or share a face area (not only an edge or a corner)."""
+    gaps = [max(a[0][i], b[0][i]) - min(a[1][i], b[1][i]) for i in range(3)]  # > 0: apart on that axis
+    return all(g <= tol for g in gaps) and sum(1 for g in gaps if g > -tol) <= 1
 
 
 def _xf_apply(data, p):
@@ -557,7 +616,9 @@ class FakeMathUtility:
 
 class FakeCylSurface:
     def __init__(self, cyl) -> None:
-        self.CylinderParams = (*[v / 1000 for v in cyl["center"]], *cyl["axis"], cyl["radius"] / 1000)
+        d = [b - a for a, b in zip(cyl["p0"], cyl["p1"])]
+        n = math.sqrt(sum(c * c for c in d)) or 1.0
+        self.CylinderParams = (*[v / 1000 for v in cyl["p0"]], *[c / n for c in d], cyl["radius"] / 1000)
 
     def IsCylinder(self) -> bool:
         return True
@@ -572,10 +633,12 @@ class FakeCylFace:
         return FakeCylSurface(self.cyl)
 
     def GetBox(self):
-        n = self.cyl["axis"].index(1.0)
-        lo = [c - self.cyl["radius"] for c in self.cyl["center"]]
-        hi = [c + self.cyl["radius"] for c in self.cyl["center"]]
-        lo[n], hi[n] = self.cyl["s"], self.cyl["e"]
+        r, p0, p1 = self.cyl["radius"], self.cyl["p0"], self.cyl["p1"]
+        d = [b - a for a, b in zip(p0, p1)]
+        n = math.sqrt(sum(c * c for c in d)) or 1.0
+        pad = [r * math.sqrt(max(0.0, 1 - (c / n) ** 2)) for c in d]  # a disc's extent on each axis
+        lo = [min(p0[i], p1[i]) - pad[i] for i in range(3)]
+        hi = [max(p0[i], p1[i]) + pad[i] for i in range(3)]
         return (*[v / 1000 for v in lo], *[v / 1000 for v in hi])
 
     def Select4(self, append, data) -> bool:
@@ -687,6 +750,7 @@ class FakeAssemblyExtension:
         with open(path, "wb") as fh:
             fh.write(b"fake assembly")
         self.asm.path = path
+        self.asm.title = os.path.basename(path)  # like SOLIDWORKS: the window takes the file's name
         errors.value = 0
         warnings.value = 0
         return True

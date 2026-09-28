@@ -250,10 +250,16 @@ def _is_unsaved(doc: Any) -> bool:
 
 
 def close_documents(app: Any, name: str, discard_unsaved: bool) -> dict:
-    """name: "" = the active window, "all" = every window, otherwise a document name."""
+    """name: "" = the active window, "all" = every window, "others" = all but the active one,
+    "new" = never-saved windows (Part1, Part2, ...), otherwise a document name."""
     key = name.strip().lower()
+    active_title = try_call(try_call(app, "ActiveDoc"), "GetTitle")
     if key == "all":
         targets = [d for d in open_documents(app) if _visible(d)]
+    elif key == "others":
+        targets = [d for d in open_documents(app) if _visible(d) and try_call(d, "GetTitle") != active_title]
+    elif key == "new":
+        targets = [d for d in open_documents(app) if _visible(d) and not try_call(d, "GetPathName")]
     elif key in ("", "active"):
         active = try_call(app, "ActiveDoc")
         if active is None:
@@ -276,3 +282,29 @@ def close_documents(app: Any, name: str, discard_unsaved: bool) -> dict:
                        "save_document, or close them with discard_unsaved=true (their changes are lost).")
     out["still_open"] = sum(1 for d in open_documents(app) if _visible(d))
     return out
+
+
+def release_file(app: Any, path: str, saving: Any = None) -> list[str]:
+    """Close the windows that hold `path`, so the file can be overwritten: the document itself and
+    the open assemblies in its folder (they load it). Only documents without unsaved changes are
+    closed. Returns their titles."""
+    target = os.path.normcase(os.path.abspath(path))
+    folder = os.path.dirname(target)
+    own = try_call(saving, "GetTitle") if saving is not None else None
+    holders = []
+    for doc in open_documents(app):
+        dpath = os.path.normcase(str(try_call(doc, "GetPathName") or ""))
+        title = try_call(doc, "GetTitle")
+        if not dpath or title == own:
+            continue
+        if dpath == target or (dpath.endswith(".sldasm") and os.path.dirname(dpath) == folder):
+            holders.append((dpath != target, doc, title))
+    closed = []
+    for _, doc, title in sorted(holders, key=lambda h: not h[0]):  # assemblies first, then the part
+        if _is_unsaved(doc):
+            raise SwError(Code.SAVE_FAILED,
+                          f"{title} is open with unsaved changes and uses {os.path.basename(path)}, so it cannot be replaced.",
+                          "Ask the user to save or close that window, then build again.")
+        call(app, "CloseDoc", title)
+        closed.append(title)
+    return closed

@@ -269,6 +269,14 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - make_assembly now re-checks a component after correcting its position (a bug found by the tests).
   - The smoke test gained a mechanism section and closes its windows at the end. 21 tools; 163 tests pass.
 
+- [ ] **Round 3 (logs 2026-09-28 09:16: "results are bad and the UX is worse").** Diagnosis:
+  - (1) EVERY tilt failed on real SW: InsertMoveCopyBody2's 3 angle slots are (about Z, about Y, about X), not (X, Y, Z). The measured boxes in sw_mcp.log prove it (asked X → got Z, asked Z → got X, Y worked). Fix: map x→slot 2, y→1, z→0, and keep the other orders as fallbacks.
+  - (2) Free tiers are tiny: Groq qwen ITPM 7000, gpt-oss TPM 8000. Our requests were 4.7k–10k tokens (tools 11.6k chars + guide 4.4k chars + history) → constant 429/413 and ping-pong between models. Gemini 3 400s: "missing thought_signature" (it needs extra_content.google.thought_signature on tool calls from other models). HF Qwen3-14B 400s: max_tokens was unset.
+  - (3) Context loss: KEEP_MESSAGES=24 dropped the original request after the 15-step stop, so "continue" had no task.
+  - (4) Models cannot plan engines: diagonal cylinders, revolves off the default planes, parts split into several bodies (and were still saved), misaligned axes → connect_parts found 0 joints.
+  - (5) SAVE_FAILED when overwriting a project part that is loaded in SW (open or referenced by the open assembly). make_assembly leaves every part window open (17–28 windows). list_project shows ~$ lock files. The old junk parts in the "V4 engine" project got into the assembly.
+  - Plan: fix tilt; slanted cylinders from start/end (auto tilt); revolve anywhere (built on a default plane, then moved); plan fails when the part is in several pieces (names the steps) and does not save it; project save releases the loaded file; make_assembly closes the part windows; manage_documents close "others"/"new"; **make_engine** (inline/V/boxer, deterministic geometry: every shaft exactly in its bore) + analytic animation from `<assembly>.motion.json`; the agent sends compact tool descriptions, compresses history but keeps the task, sticky routing, 413 handling, Gemini signatures, max_tokens, a repeated-failure guard.
+
 **NEXT: the user updates (Tools option 8), runs Tools option 3, and sends the zip. Check the mechanism and motion-study lines and the logged member names.**
 1. `git pull`, then double-click `Install SolidWorks Assistant.bat` (connect providers, create the shortcut).
 2. `.venv\Scripts\python scripts\smoke_test.py` and send the report. Phase 5 real-SW calls are unverified: InsertMoveCopyBody2, InsertCombineFeature, FeatureRevolve2 + CreateCenterLine, AddComponent5 placement.

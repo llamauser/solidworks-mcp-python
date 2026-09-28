@@ -210,6 +210,9 @@ def shape_of(step: Any) -> m.Shape | m.Revolve | None:
         return m.revolve_spec(step.axis, step.center, step.profile, step.angle, cut)
     rot = getattr(step, "rotate", None)
     if shape is not None and rot is not None and abs(rot.deg) > 1e-9:
+        if shape.tilt is not None:
+            raise SwError(Code.BAD_ARGUMENT, "This cylinder is already slanted by its start and end, and it has a rotate too.",
+                          "Use one of them: either a straight start/end plus rotate, or a slanted start/end alone.")
         shape.tilt = (rot.axis, rot.deg, tuple(rot.about))
     return shape
 
@@ -279,6 +282,8 @@ def execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "", keep_open:
     title = try_call(doc, "GetTitle")
     volume_before = modeler.volume_mm3()
     log: list[str] = []
+    pieces = len(modeler.bodies())
+    split_by: list[str] = []  # steps after which the part had more separate pieces
     for i, (step, shape) in enumerate(zip(plan.steps, shapes), 1):
         try:
             if isinstance(shape, m.Revolve):
@@ -303,6 +308,12 @@ def execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "", keep_open:
                 if created else f"{err.fix} The steps before it stay in the part.",
                 infra=err.infra, retryable=False, reconnect=err.reconnect,
             ) from None
+        now = len(modeler.bodies())
+        if now > pieces and shape is not None:
+            mode = getattr(step, "mode", "add")
+            split_by.append(f"step {i} ({step.op} {mode}) " + ("cut the part apart" if mode == "cut"
+                                                              else "does not touch the rest of the part"))
+        pieces = now
     if plan.name and created:
         try_call(doc, "SetTitle2", plan.name)
     summary = modeler.summary()
@@ -317,12 +328,25 @@ def execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "", keep_open:
             problems.append(f"size is {summary['size_mm']} but the plan expected {list(exp.size)}")
     if exp and exp.bodies is not None and summary.get("bodies") != exp.bodies:
         problems.append(f"{summary.get('bodies')} bodies, expected {exp.bodies}")
+    wanted_bodies = exp.bodies if exp and exp.bodies is not None else 1
+    if summary.get("bodies", 1) > wanted_bodies:
+        if created and title:
+            _unsaved_failed_builds.append(try_call(doc, "GetTitle") or title)
+        where = "; ".join(split_by) if split_by else "a shape does not overlap the others"
+        raise SwError(
+            Code.CHECK_FAILED,
+            f"The part came out in {summary['bodies']} separate pieces, so it was not saved: {where}. "
+            f"Size {summary.get('size_mm')}, from {summary.get('min_mm')} to {summary.get('max_mm')}.",
+            "Every added shape must overlap the part by at least 1 mm (a crank pin must reach into its web, "
+            "a web into the shaft), and a cut must not slice the part in two. Fix those steps and send the "
+            "whole plan again. If separate bodies are wanted, set \"expect\": {\"bodies\": N}.",
+        )
     if problems:
         out["check"] = "MISMATCH: " + "; ".join(problems) + ". Find the step with the wrong numbers and rebuild."
     else:
         out["check"] = "matches the plan" if exp else "no expect given"
     if save_as.strip():
-        out["saved_as"] = project.save_part(doc, save_as)
+        out.update(project.save_part(app, doc, save_as))
         if created and not keep_open:
             try_call(app, "CloseDoc", try_call(doc, "GetTitle"))  # saved, so closing loses nothing
             out["window"] = "closed (the part is saved in the project)"

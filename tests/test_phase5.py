@@ -40,9 +40,10 @@ def test_revolve_spec_validation():
     assert spec.sketch_plane() == ("z", 0) and spec.box() == ([-20, 0, -20], [20, 10, 20])
     with pytest.raises(SwError):
         m.revolve_spec("y", (0, 0, 0), [(-5, 0), (20, 0), (20, 10)], 360, cut=False)  # crosses the axis
-    with pytest.raises(SwError) as info:
-        m.revolve_spec("y", (5, 0, 5), [(0, 0), (20, 0), (20, 10)], 360, cut=False)  # axis off the planes
-    assert "center x=0 or z=0" in info.value.fix
+    off = m.revolve_spec("y", (5, 0, 5), [(0, 0), (20, 0), (20, 10)], 360, cut=False)  # axis off the planes
+    placed, offset = off.shifted()
+    assert placed.center == (5, 0, 0) and offset == [0.0, 0.0, 5] and placed.sketch_plane() == ("z", 0)
+    assert spec.shifted() == (spec, [0.0, 0.0, 0.0])
     assert m.revolve_spec("x", (0, 30, 0), [(0, 0), (8, 0), (8, 50), (0, 50)], 360, cut=False).sketch_plane() == ("z", 1)
 
 
@@ -117,6 +118,63 @@ def test_tilted_row_of_bores(app):
     out = parse(build_part(plan=json.dumps({"steps": [
         BLOCK, bore(45, x=-30), {"op": "repeat", "copies": 1, "step": [60, 0, 0]}]})))
     assert out["ok"] and out["features"] == 3 and not app.created[-1].extra_bodies
+
+
+def test_tilt_uses_the_measured_angle_order_first(app):
+    """SOLIDWORKS 2024 turns Move/Copy slot 0 about Z: asking X must use slot 2 on the first try."""
+    out = parse(build_part(plan=json.dumps({"steps": [BLOCK, {
+        "op": "cylinder", "mode": "cut", "start": [0, 20, 0], "end": [0, 120, 0], "diameter": 20,
+        "rotate": {"axis": "x", "deg": 30, "about": [0, 20, 0]}}]})))
+    assert out["ok"] and out["bodies"] == 1
+    moves = [f for f in app.created[-1].features if f.GetTypeName2() == "MoveCopyBody"]
+    assert len(moves) == 1
+
+
+def test_tilt_falls_back_to_the_documented_angle_order(app):
+    parse(build_part(plan=json.dumps({"steps": [BLOCK]})))
+    part = app.created[-1]
+    part.documented_angle_order = True
+    out = parse(build_part(plan=json.dumps({"steps": [{
+        "op": "cylinder", "mode": "cut", "start": [0, 20, 0], "end": [0, 120, 0], "diameter": 20,
+        "rotate": {"axis": "x", "deg": 30, "about": [0, 20, 0]}}]}), start_new_part=False))
+    assert out["ok"] and not part.extra_bodies
+
+
+def test_slanted_cylinder_from_start_and_end(app):
+    """A V-engine bore written the natural way: from the crank axis out along the bank."""
+    out = parse(build_part(plan=json.dumps({"steps": [
+        {"op": "box", "x": [-60, 60], "y": [0, 120], "z": [-80, 80]},
+        {"op": "cylinder", "mode": "cut", "start": [0, 30, 0], "end": [0, 130, 100], "diameter": 40},
+        {"op": "cylinder", "mode": "cut", "start": [0, 30, 0], "end": [0, 130, -100], "diameter": 40}]})))
+    assert out["ok"] and out["bodies"] == 1 and not app.created[-1].extra_bodies
+    assert out["volume_mm3"] < 120 * 120 * 160 - 50000
+
+
+def test_revolve_off_the_default_planes_is_moved_into_place(app):
+    """A crank journal at y=90, z=-45 (the model's own coordinates) no longer needs to sit on a plane."""
+    out = parse(build_part(plan=json.dumps({"steps": [
+        {"op": "revolve", "axis": "x", "center": [0, 90, -45], "profile": [[0, -20], [21, -20], [21, 20], [0, 20]]}]})))
+    assert out["ok"] and out["bodies"] == 1
+    assert out["min_mm"] == [-20.0, 69.0, -66.0] and out["max_mm"] == [20.0, 111.0, -24.0]
+    out = parse(build_part(plan=json.dumps({"steps": [
+        {"op": "box", "x": [-40, 40], "y": [60, 120], "z": [-80, -10]},
+        {"op": "revolve", "mode": "cut", "axis": "x", "center": [0, 90, -45],
+         "profile": [[0, -50], [10, -50], [10, 50], [0, 50]]}]})))
+    assert out["ok"] and out["bodies"] == 1 and out["volume_mm3"] < 80 * 60 * 70
+
+
+def test_part_in_separate_pieces_is_refused_and_not_saved(app):
+    out = parse(build_part(plan=json.dumps({"steps": [
+        {"op": "box", "x": [-20, 20], "y": [0, 10], "z": [-20, 20]},
+        {"op": "cylinder", "start": [0, 30, 0], "end": [0, 40, 0], "diameter": 5}]}), save_as="Kit/floating"))
+    assert out["error"] == Code.CHECK_FAILED and "2 separate pieces" in out["message"]
+    assert "step 2 (cylinder add) does not touch" in out["message"] and "not saved" in out["message"]
+    assert "floating" not in json.dumps(parse(list_project(project="Kit"))) if (pr.projects_root() / "Kit").exists() else True
+    ok = parse(build_part(plan=json.dumps({"steps": [
+        {"op": "box", "x": [-20, 20], "y": [0, 10], "z": [-20, 20]},
+        {"op": "cylinder", "start": [0, 30, 0], "end": [0, 40, 0], "diameter": 5}], "expect": {"bodies": 2}})))
+    assert ok["ok"] and ok["bodies"] == 2
+    assert app.closed  # the refused part's window was closed before the next build
 
 
 def test_revolve_disc_volume(app):

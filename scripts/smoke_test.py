@@ -325,7 +325,7 @@ async def build_checks(client: Client, work: str) -> None:
                lambda o: o.get("check") == "matches the plan" and abs(o.get("volume_mm3", 0) - flange) < 0.01 * flange,
                plan=json.dumps(plan))
     bad = await tool(client, "build_part",
-                     plan='{"steps":[{"op":"cylinder","start":[0,0,0],"end":[5,5,0],"diameter":3}]}')
+                     plan='{"steps":[{"op":"cylinder","start":[0,0,0],"end":[5,5,5],"diameter":3}]}')
     rejected = bad.get("error") == "BAD_ARGUMENT" and "Step 1 (cylinder)" in bad.get("message", "")
     record("build: build_part rejects a bad plan before building", "PASS" if rejected else "FAIL", short(bad, 400))
 

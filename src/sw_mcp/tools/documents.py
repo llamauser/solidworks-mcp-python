@@ -55,7 +55,8 @@ def save_document(
 def manage_documents(
     sw: Session,
     action: Annotated[Literal["list", "activate", "close"], Field(description="list, activate (bring to front) or close.")],
-    name: Annotated[str, Field(description='Document name. For close: "" = the active window, "all" = every window.')] = "",
+    name: Annotated[str, Field(description='Document name. For close also: "" = the active window, "all", '
+                                           '"others" = all but the active one, "new" = never-saved parts.')] = "",
     discard_unsaved: Annotated[bool, Field(description="Only true if the user agreed to lose unsaved changes.")] = False,
 ) -> dict:
     """List, bring to the front, or close SolidWorks windows.
@@ -64,7 +65,8 @@ def manage_documents(
     Closing never loses work unless discard_unsaved=true: unsaved documents are reported instead.
     Examples: manage_documents(action="list")
               manage_documents(action="activate", name="V4 engine")
-              manage_documents(action="close", name="all")
+              manage_documents(action="close", name="others")
+              manage_documents(action="close", name="new", discard_unsaved=true)  (only if the user agreed)
     """
     if action == "list":
         return docs.list_documents(sw.app)

@@ -177,7 +177,7 @@ def test_assistant_builds_a_part_with_one_plan(fake_solidworks):
 
 def test_assistant_rescues_a_plan_sent_as_text_and_fixes_after_error(fake_solidworks):
     bad_plan = {"steps": [{"op": "box", "x": [-30, 30], "y": [0, 10], "z": [-20, 20]},
-                          {"op": "cylinder", "mode": "cut", "start": [0, 0, 0], "end": [5, 10, 0], "diameter": 5}]}
+                          {"op": "cylinder", "mode": "cut", "start": [0, 0, 0], "end": [5, 10, 5], "diameter": 5}]}
     good_plan = {"steps": [bad_plan["steps"][0],
                            {"op": "cylinder", "mode": "cut", "start": [0, -1, 0], "end": [0, 11, 0], "diameter": 5}]}
     llm = Scripted([

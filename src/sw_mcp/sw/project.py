@@ -57,10 +57,17 @@ def part_path(save_as: str) -> Path:
     return folder / f"{name}.SLDPRT"
 
 
-def save_part(doc: Any, save_as: str) -> str:
+def save_part(app: Any, doc: Any, save_as: str) -> dict:
+    """Save into the project folder, replacing an older version of the part. SolidWorks cannot
+    overwrite a file it has loaded, so saved windows holding it (the part, its assembly) are closed."""
     path = part_path(save_as)
+    out: dict[str, Any] = {"saved_as": str(path)}
+    if path.exists():
+        released = documents.release_file(app, str(path), saving=doc)
+        if released:
+            out["closed_to_replace"] = released
     documents.save_document(doc, str(path), overwrite=True)
-    return str(path)
+    return out
 
 
 def list_project(project: str) -> dict:
@@ -72,7 +79,8 @@ def list_project(project: str) -> dict:
     if not folder.exists():
         raise SwError(Code.NOT_FOUND, f"There is no project called '{project}'.",
                       "Call list_project with an empty name to see the projects.")
-    files = sorted(folder.glob("*.SLDPRT")) + sorted(folder.glob("*.SLDASM"))
+    files = [f for f in sorted(folder.glob("*.SLDPRT")) + sorted(folder.glob("*.SLDASM"))
+             if not f.name.startswith("~$")]  # SolidWorks' lock files for open documents
     return {
         "project": folder.name,
         "folder": str(folder),
@@ -81,12 +89,13 @@ def list_project(project: str) -> dict:
     }
 
 
-def _open(app: Any, path: str) -> Any:
+def _open(app: Any, path: str) -> tuple[Any, bool]:
+    """The loaded document for `path`, and whether this call opened it."""
     doc = try_call(app, "GetOpenDocumentByName", path)
     if doc is not None:
-        return doc
+        return doc, False
     documents.open_document(app, path)
-    return try_call(app, "GetOpenDocumentByName", path) or try_call(app, "ActiveDoc")
+    return try_call(app, "GetOpenDocumentByName", path) or try_call(app, "ActiveDoc"), True
 
 
 def _activate(app: Any, title: str) -> None:
@@ -120,7 +129,7 @@ def make_assembly(app: Any, project: str, parts: str, name: str) -> dict:
     if not folder.exists():
         raise SwError(Code.NOT_FOUND, f"There is no project called '{project}'.",
                       "Save parts first with build_part(save_as=\"project/part\").")
-    available = {f.stem.lower(): f for f in folder.glob("*.SLDPRT")}
+    available = {f.stem.lower(): f for f in folder.glob("*.SLDPRT") if not f.name.startswith("~$")}
     wanted = [p.strip() for p in parts.split(",") if p.strip()] if parts.strip().lower() not in ("", "all") else []
     if wanted:
         missing = [w for w in wanted if w.lower() not in available]
@@ -141,9 +150,12 @@ def make_assembly(app: Any, project: str, parts: str, name: str) -> dict:
                       "Ask the user to set one in Tools > Options > Default Templates.")
 
     part_boxes = {}
+    opened_here = []
     for f in files:  # parts must be loaded before they can be inserted
-        doc = _open(app, str(f))
+        doc, opened = _open(app, str(f))
         part_boxes[f.stem] = Modeler(app, doc).bbox_mm() if doc is not None else None
+        if opened and doc is not None:
+            opened_here.append(try_call(doc, "GetTitle"))
     asm = call(app, "NewDocument", template, 0, 0.0, 0.0)
     if asm is None:
         raise SwError(Code.SW_ERROR, "SolidWorks could not create an assembly.", "Check the assembly template.")
@@ -172,7 +184,13 @@ def make_assembly(app: Any, project: str, parts: str, name: str) -> dict:
                     warnings.append(f"{f.stem}: placed {max(abs(v) for v in off):.1f} mm off its design position")
 
     path = folder / f"{_clean(name) or 'Assembly'}.SLDASM"
+    if path.exists():
+        documents.release_file(app, str(path), saving=asm)
     documents.save_document(asm, str(path), overwrite=True)
+    for part_title in opened_here:  # the assembly keeps them loaded; their own windows are clutter
+        if part_title:
+            try_call(app, "CloseDoc", part_title)
+    _activate(app, try_call(asm, "GetTitle") or title)
     try_call(asm, "ViewZoomtofit2")
     out: dict[str, Any] = {"assembly": str(path), "components": placed}
     box = as_list(try_call(asm, "GetBox", 0))

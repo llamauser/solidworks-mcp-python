@@ -15,6 +15,7 @@ from sw_mcp.sw import plan as p
 from sw_mcp.tools.documents import manage_documents
 from sw_mcp.tools.mechanism import connect_parts, make_motion_study, move_mechanism
 from sw_mcp.tools.plan import build_part
+from sw_mcp.tools.project import list_project as list_project_tool
 from sw_mcp.tools.project import make_assembly
 from tests.conftest import parse
 
@@ -135,3 +136,30 @@ def test_motion_study_failures_are_explained(app, monkeypatch):
 def test_mechanism_tools_need_an_assembly(app):
     parse(build_part(plan=json.dumps(HEAD)))
     assert parse(connect_parts())["error"] == Code.WRONG_DOC_TYPE
+
+
+def test_close_others_and_new(app):
+    parse(build_part(plan=json.dumps(HEAD)))  # Part1, never saved
+    parse(build_part(plan=json.dumps(HEAD), save_as="Mini/a", keep_open=True))  # a.SLDPRT, saved
+    parse(build_part(plan=json.dumps(HEAD)))  # Part3, never saved and active
+    out = parse(manage_documents(action="close", name="new"))
+    assert out["closed"] == [] and sorted(out["kept_unsaved"]) == ["Part1", "Part3"]
+    out = parse(manage_documents(action="close", name="others", discard_unsaved=True))
+    assert sorted(out["closed"]) == ["Part1", "a.SLDPRT"] and "Part3" not in out["closed"]
+
+
+def test_rebuilding_a_saved_part_releases_the_open_assembly(app):
+    build_engine()
+    asm = app.created[-1]
+    assert asm.path.endswith("Mini.SLDASM")
+    out = parse(build_part(plan=json.dumps(HEAD), save_as="Mini/head"))
+    assert out["ok"] and "Mini.SLDASM" in out["closed_to_replace"]
+    assert parse(list_project_tool(project="Mini"))["parts"] == ["block", "crank", "head"]
+
+
+def test_list_project_hides_lock_files(app, tmp_path):
+    build_engine()
+    folder = tmp_path / "projects" / "Mini"
+    (folder / "~$block.SLDPRT").write_bytes(b"lock")
+    listed = parse(list_project_tool(project="Mini"))
+    assert "~$block" not in listed["parts"]
