@@ -74,6 +74,8 @@ OpenCode shows each tool with the server name as a prefix, e.g. `solidworks_get_
 | `make_box` | `mode` (add/cut), `x/y/z_min_mm`, `x/y/z_max_mm` | Adds or cuts a block between world coordinates: plates, ribs, pockets, slots. |
 | `make_cylinder` | `mode`, start and end centers (`start_x_mm` … `end_z_mm`), `diameter_mm` | Adds a boss or rod, or cuts a hole, along X, Y or Z. |
 | `make_prism` | `mode`, `axis`, `points_mm` ("a,b; a,b; …"), `start_mm`, `end_mm` | Adds or cuts any straight-sided outline (L, T, U, triangle) pushed along an axis. |
+| `repeat_last_shape` | `copies`, `step_x/y/z_mm` | Copies the last shape in a row. A second repeat copies the whole group, so a grid takes two calls. |
+| `repeat_last_shape_around` | `copies`, `angle_step_deg`, center | Copies the last shape or group around a circle: bolt circles, spokes. |
 | `finish_edges` | `kind` (fillet/chamfer), `size_mm`, `edges` (vertical/top/bottom/parallel_x/parallel_z/circular/all) | Rounds or bevels a group of edges. |
 | `undo_last_feature` | none | Deletes the most recent feature. |
 | `get_model_summary` | none | Size, min/max, volume, body count and feature list, to check a build against the request. |

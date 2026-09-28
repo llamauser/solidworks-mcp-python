@@ -44,7 +44,9 @@ Geometry rules:
 - make_box takes min and max on each axis. A plate 80 x 50 x 8 is x -40..40, y 0..8, z -25..25.
 - Through hole: make_cylinder with mode "cut" from 1 mm below the part to 1 mm above it.
 - Blind hole 5 deep in the top of an 8 mm plate: y from 3 to 8. A boss on top of that plate starts at y=8.
-- For repeated holes, work out each center and cut them one by one.
+- Repeats: build ONE shape, then solidworks_repeat_last_shape (a row, with a step) or
+  solidworks_repeat_last_shape_around (a circle, angle_step_deg = 360/N). A second repeat
+  copies the whole group, so a grid is two repeats. Never make repeated shapes one by one.
 - make_prism is for L, T, U, triangle or other straight-sided outlines. Points are (x,y) for axis z,
   (x,z) for axis y, and (y,z) for axis x.
 
@@ -53,11 +55,10 @@ PLAN
 1 new_part
 2 make_box add x -30..30, y 0..10, z -20..20
 3 finish_edges fillet 5 vertical
-4 make_cylinder cut (22,-1,12) to (22,11,12) d6
-5 make_cylinder cut (-22,-1,12) to (-22,11,12) d6
-6 make_cylinder cut (22,-1,-12) to (22,11,-12) d6
-7 make_cylinder cut (-22,-1,-12) to (-22,11,-12) d6
-8 get_model_summary: expect size 60, 10, 40
+4 make_cylinder cut (-22,-1,-12) to (-22,11,-12) d6
+5 repeat_last_shape copies 1, step_x 44   (now 2 holes in a row)
+6 repeat_last_shape copies 1, step_z 24   (copies the whole row: 4 holes)
+7 get_model_summary: expect size 60, 10, 40
 (The hole centers are 30-8=22 and 20-8=12.)
 
 EDITING an existing part: ask the user to click the face or dimension, call

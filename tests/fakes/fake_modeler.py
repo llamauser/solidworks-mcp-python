@@ -103,8 +103,18 @@ class FakeCurve:
 
 
 class FakeEdge:
-    def __init__(self, a, b) -> None:
+    def __init__(self, a, b, doc=None) -> None:
         self._p = (*[v / 1000 for v in a], *[v / 1000 for v in b], 0.0, 1.0, 1.0)
+        self._doc = doc
+
+    def Select4(self, append, data) -> bool:
+        if self._doc is None:
+            raise AttributeError("<unknown>.Select4")
+        if not append:
+            self._doc.selected = []
+        mid = tuple((self._p[i] + self._p[i + 3]) / 2 for i in range(3))
+        self._doc.selected.append(("EDGE", mid))
+        return True
 
     def GetCurveParams2(self):
         return self._p
@@ -123,13 +133,13 @@ class FakeBody:
         xs, ys, zs = (lo[0], hi[0]), (lo[1], hi[1]), (lo[2], hi[2])
         for y in ys:
             for z in zs:
-                edges.append(FakeEdge((xs[0], y, z), (xs[1], y, z)))
+                edges.append(FakeEdge((xs[0], y, z), (xs[1], y, z), self.doc))
         for x in xs:
             for z in zs:
-                edges.append(FakeEdge((x, ys[0], z), (x, ys[1], z)))
+                edges.append(FakeEdge((x, ys[0], z), (x, ys[1], z), self.doc))
         for x in xs:
             for y in ys:
-                edges.append(FakeEdge((x, y, zs[0]), (x, y, zs[1])))
+                edges.append(FakeEdge((x, y, zs[0]), (x, y, zs[1]), self.doc))
         return tuple(edges)
 
 
@@ -169,6 +179,8 @@ class FakeFeatureManager:
         ia, ib = IN_PLANE[n]
         sign = -1.0 if doc.reverse_convention else 1.0
         direction = -sign if reverse else sign
+        if cut:
+            direction = -direction  # like SOLIDWORKS: a cut needs reverse=True to go along +normal
         start = 0.0 if t0 == 0 else (-offset if flip_offset else offset)
         s, e = sorted((start * 1000, (start + direction * depth) * 1000))
 

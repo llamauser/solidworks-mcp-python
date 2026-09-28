@@ -249,11 +249,16 @@ async def build_checks(client: Client, work: str) -> None:
     await step("fillet 4 vertical corners R3", "finish_edges",
                lambda o: o.get("edges") == 4 and -80 < o.get("volume_change_mm3", 0) < -75,
                kind="fillet", size_mm=3, edges="vertical")
-    for x, z in ((22, 12), (-22, 12), (22, -12), (-22, -12)):
-        await step(f"hole d6 at x={x} z={z}", "make_cylinder",
-                   lambda o: abs(o.get("volume_change_mm3", 0) + 282.7) < 3,
-                   mode="cut", start_x_mm=x, start_y_mm=-1, start_z_mm=z, end_x_mm=x, end_y_mm=11,
-                   end_z_mm=z, diameter_mm=6)
+    await step("hole d6 at x=-22 z=-12", "make_cylinder",
+               lambda o: abs(o.get("volume_change_mm3", 0) + 282.7) < 3,
+               mode="cut", start_x_mm=-22, start_y_mm=-1, start_z_mm=-12, end_x_mm=-22, end_y_mm=11,
+               end_z_mm=-12, diameter_mm=6)
+    await step("repeat hole along X (row of 2)", "repeat_last_shape",
+               lambda o: o.get("group_size") == 2 and abs(o.get("volume_change_mm3", 0) + 282.7) < 3,
+               copies=1, step_x_mm=44)
+    await step("repeat the row along Z (grid of 4)", "repeat_last_shape",
+               lambda o: o.get("group_size") == 4 and abs(o.get("volume_change_mm3", 0) + 565.5) < 5,
+               copies=1, step_z_mm=24)
     await step("pocket 20x10, 4 deep", "make_box",
                lambda o: abs(o.get("volume_change_mm3", 0) + 800) < 2,
                mode="cut", x_min_mm=-10, x_max_mm=10, y_min_mm=6, y_max_mm=10, z_min_mm=-5, z_max_mm=5)
@@ -274,6 +279,35 @@ async def build_checks(client: Client, work: str) -> None:
                <= {f.get("name") for f in o.get("features", [])})
     path = os.path.join(work, "Built.SLDPRT")
     await step("save the built part", "save_document", lambda o: os.path.isfile(path), save_as_path=path)
+
+    # A flange: bolt circle with repeat_last_shape_around, a row of pins with repeat_last_shape.
+    if not (await step("flange: new_part", "new_part")).get("ok"):
+        return
+    await step("flange: disc d90 x 10", "make_cylinder",
+               lambda o: o.get("size_mm") == [90.0, 10.0, 90.0],
+               mode="add", start_x_mm=0, start_y_mm=0, start_z_mm=0, end_x_mm=0, end_y_mm=10, end_z_mm=0,
+               diameter_mm=90)
+    await step("flange: bolt hole d8 at r=35", "make_cylinder",
+               lambda o: abs(o.get("volume_change_mm3", 0) + 502.7) < 4,
+               mode="cut", start_x_mm=35, start_y_mm=-1, start_z_mm=0, end_x_mm=35, end_y_mm=11, end_z_mm=0,
+               diameter_mm=8)
+    await step("flange: 5 more holes every 60 degrees", "repeat_last_shape_around",
+               lambda o: len(o.get("features", [])) == 5 and abs(o.get("volume_change_mm3", 0) + 2513.3) < 15,
+               copies=5, angle_step_deg=60)
+    await step("flange: center bore d30", "make_cylinder",
+               lambda o: abs(o.get("volume_change_mm3", 0) + 7068.6) < 30,
+               mode="cut", start_x_mm=0, start_y_mm=-1, start_z_mm=0, end_x_mm=0, end_y_mm=11, end_z_mm=0,
+               diameter_mm=30)
+    await step("flange: pin d6 x 6 on top", "make_cylinder",
+               lambda o: o.get("size_mm") == [90.0, 16.0, 90.0],
+               mode="add", start_x_mm=-10, start_y_mm=10, start_z_mm=25, end_x_mm=-10, end_y_mm=16, end_z_mm=25,
+               diameter_mm=6)
+    await step("flange: 2 more pins in a row", "repeat_last_shape",
+               lambda o: len(o.get("features", [])) == 2 and abs(o.get("volume_change_mm3", 0) - 339.3) < 4,
+               copies=2, step_x_mm=10)
+    flange = 63617.3 - 6 * 502.65 - 7068.6 + 3 * 169.65
+    await step(f"flange: summary (expect about {flange:.0f} mm3, 1 body)", "get_model_summary",
+               lambda o: o.get("bodies") == 1 and abs(o.get("volume_mm3", 0) - flange) < 0.01 * flange)
 
 
 def write_report() -> None:

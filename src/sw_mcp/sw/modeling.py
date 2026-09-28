@@ -184,6 +184,30 @@ def prism_shape(axis: str, points_mm: str, start: float, end: float, cut: bool) 
     return Shape(axis, prof, start, end, cut, "Cut-Prism" if cut else "Prism")
 
 
+def translated(shape: Shape, dx: float, dy: float, dz: float) -> Shape:
+    d = (dx, dy, dz)
+    ia, ib = IN_PLANE[shape.axis]
+    n = AXIS_INDEX[shape.axis]
+    pts = [(a + d[ia], b + d[ib]) for a, b in shape.profile.points]
+    prof = Profile(shape.profile.kind, pts, shape.profile.radius)
+    return Shape(shape.axis, prof, shape.start + d[n], shape.end + d[n], shape.cut, shape.label)
+
+
+def rotated(shape: Shape, angle_deg: float, center: tuple[float, float, float]) -> Shape:
+    """Rotate a shape about a line parallel to its own axis through `center` (right-hand rule
+    about the +axis direction). The profile turns in its plane; the extent along the axis stays."""
+    ia, ib = IN_PLANE[shape.axis]
+    ca, cb = center[ia], center[ib]
+    # In-plane (a, b) are (y,z) for x and (x,y) for z: right-handed. For y they are (x,z),
+    # which is left-handed about +Y, so the angle flips sign.
+    t = math.radians(-angle_deg if shape.axis == "y" else angle_deg)
+    cos, sin = math.cos(t), math.sin(t)
+    pts = [(ca + (a - ca) * cos - (b - cb) * sin, cb + (a - ca) * sin + (b - cb) * cos)
+           for a, b in shape.profile.points]
+    prof = Profile(shape.profile.kind, pts, shape.profile.radius)
+    return Shape(shape.axis, prof, shape.start, shape.end, shape.cut, shape.label)
+
+
 def placement_ok(shape: Shape, face_boxes_mm: list[tuple[list[float], list[float]]], tol: float = TOL_MM) -> bool:
     """True when most faces of the new feature sit inside the requested region.
 
@@ -233,6 +257,16 @@ def edge_matches(edge: EdgeInfo, which: str, part_min: list[float], part_max: li
 
 
 # ============================================================ COM helpers
+# Per document: the last shape built, or the last repeated group, for the repeat tools
+# (kept in server memory).
+_last_group: dict[str, list[Shape]] = {}
+MAX_COPIES = 50
+
+
+def _doc_key(doc: Any) -> str:
+    return str(try_call(doc, "GetPathName") or try_call(doc, "GetTitle") or "")
+
+
 def _m(values: Any) -> list[float]:
     return [float(v) * 1000.0 for v in as_list(values)[:3]]
 
@@ -446,9 +480,12 @@ class Modeler:
         volume_before = self.volume_mm3()
         at_plane = abs(shape.start) < 1e-6
         guess_flip = shape.start < 0
-        attempts = [(False, guess_flip), (True, guess_flip)]
+        # Measured on SOLIDWORKS 2024: a boss goes along +normal with reverse=False, while a cut
+        # needs reverse=True for the same direction. Other combinations stay as fallbacks.
+        guess_reverse = shape.cut
+        attempts = [(guess_reverse, guess_flip), (not guess_reverse, guess_flip)]
         if not at_plane:
-            attempts += [(False, not guess_flip), (True, not guess_flip)]
+            attempts += [(guess_reverse, not guess_flip), (not guess_reverse, not guess_flip)]
         tried: list[str] = []
         exact_transform = False
         for mirror in (False, True):
@@ -478,6 +515,7 @@ class Modeler:
         )
 
     def _finish(self, shape: Shape, feature: Any, volume_before: float, attempts: int) -> dict:
+        _last_group[_doc_key(self.doc)] = [shape]
         name = self.unique_name(shape.label)
         try:
             feature.Name = name
@@ -494,6 +532,62 @@ class Modeler:
         elif not shape.cut and change < 0.01 and summary.get("bodies", 1) <= 1:
             out["warning"] = "This shape added no material. It is probably completely inside the part."
         return out
+
+    # ---------------------------------------------------------------- repeats
+    def last_group(self) -> list[Shape]:
+        """The last shape, or the whole group (original + copies) made by the previous repeat."""
+        group = _last_group.get(_doc_key(self.doc))
+        if not group:
+            raise SwError(Code.NOT_FOUND, "There is no shape to repeat in this part yet.",
+                          "Make the first one with make_box, make_cylinder or make_prism, then repeat it.")
+        return group
+
+    def repeat(self, base: list[Shape], copies: list[Shape]) -> dict:
+        """Build the copies in order. Stops at the first failure and says how far it got.
+        Afterwards the whole group (base + copies) becomes what the next repeat copies."""
+        volume_before = self.volume_mm3()
+        names: list[str] = []
+        made: list[Shape] = []
+        key = _doc_key(self.doc)
+        try:
+            for i, shape in enumerate(copies, 1):
+                try:
+                    names.append(self.build(shape)["feature"])
+                    made.append(shape)
+                except SwError as err:
+                    err.message = f"Copy {i} of {len(copies)} failed: {err.message}"
+                    if names:
+                        err.message += f" Copies already made: {', '.join(names)}."
+                    raise
+        finally:
+            _last_group[key] = base + made
+        out: dict[str, Any] = {"features": names, "group_size": len(base) + len(made), **self.summary()}
+        out["volume_change_mm3"] = round(out["volume_mm3"] - volume_before, 1)
+        return out
+
+    def repeat_linear(self, copies: int, dx: float, dy: float, dz: float) -> dict:
+        if abs(dx) + abs(dy) + abs(dz) < 0.001:
+            raise _bad("The step is zero, so all copies would sit on top of each other.",
+                       "Give step_x_mm, step_y_mm or step_z_mm.")
+        base = self.last_group()
+        self._check_count(len(base) * copies)
+        new = [translated(s, dx * k, dy * k, dz * k) for k in range(1, copies + 1) for s in base]
+        return self.repeat(base, new)
+
+    def repeat_around(self, copies: int, step_deg: float, center: tuple[float, float, float]) -> dict:
+        if abs(step_deg) < 0.01 or abs(step_deg) * copies > 360.001:
+            raise _bad(f"angle_step_deg {step_deg} with {copies} copies is not valid.",
+                       "For N evenly spaced items make 1 and repeat N-1 copies with angle_step_deg = 360/N.")
+        base = self.last_group()
+        self._check_count(len(base) * copies)
+        new = [rotated(s, step_deg * k, center) for k in range(1, copies + 1) for s in base]
+        return self.repeat(base, new)
+
+    @staticmethod
+    def _check_count(total: int) -> None:
+        if total > MAX_COPIES:
+            raise _bad(f"That would make {total} new shapes; the limit is {MAX_COPIES} per call.",
+                       "Use fewer copies, or repeat in two steps.")
 
     # ---------------------------------------------------------------- edges
     def edges(self) -> list[tuple[Any, EdgeInfo]]:
@@ -516,24 +610,40 @@ class Modeler:
                                            try_call(curve, "IsCircle") is True)))
         return out
 
+    def _select_edge(self, edge: Any, info: EdgeInfo) -> bool:
+        """Add one edge to the selection. Selecting the object itself never misses; clicking a
+        3D point (the last resort) can miss edges hidden from the current view."""
+        for attempt in (
+            lambda: call(edge, "Select4", True, null_dispatch()),
+            lambda: call(edge, "Select2", True, 0),
+            lambda: call(call(self.doc, "Extension"), "SelectByID2", "", "EDGE",
+                         *(c / 1000 for c in info.mid), True, 0, null_dispatch(), 0),
+        ):
+            try:
+                if attempt():
+                    return True
+            except Exception:  # noqa: BLE001 - try the next way
+                continue
+        return False
+
     def finish_edges(self, kind: str, size_mm: float, which: str) -> dict:
         box = self.bbox_mm()
         if box is None:
             raise SwError(Code.NOT_FOUND, "The part has no solid body yet.", "Build a shape first.")
-        chosen = [info for _, info in self.edges() if edge_matches(info, which, box[0], box[1])]
+        chosen = [(edge, info) for edge, info in self.edges() if edge_matches(info, which, box[0], box[1])]
         if not chosen:
             raise SwError(Code.NOT_FOUND, f"No edges match '{which}'.",
                           "Use another choice, or call get_model_summary to see the part.")
         self.exit_sketch()
         call(self.doc, "ClearSelection2", True)
-        ext = call(self.doc, "Extension")
-        picked = 0
-        for info in chosen:
-            x, y, z = (c / 1000 for c in info.mid)
-            if call(ext, "SelectByID2", "", "EDGE", x, y, z, picked > 0, 0, null_dispatch(), 0):
-                picked += 1
+        picked = sum(1 for edge, info in chosen if self._select_edge(edge, info))
+        counted = try_call(try_call(self.doc, "SelectionManager"), "GetSelectedObjectCount2", -1)
+        if isinstance(counted, int) and counted >= 0:
+            picked = counted
         if picked == 0:
             raise SwError(Code.SW_ERROR, "SolidWorks could not select those edges.", "Try another choice.")
+        if picked < len(chosen):
+            log.warning("finish_edges: selected %d of %d '%s' edges", picked, len(chosen), which)
         volume_before = self.volume_mm3()
         fm = call(self.doc, "FeatureManager")
         size = size_mm / 1000
@@ -588,5 +698,6 @@ def new_part(app: Any) -> dict:
     if doc is None:
         raise SwError(Code.SW_ERROR, f"SolidWorks could not create a part from {template}.",
                       "Ask the user to check the default part template.")
+    _last_group.pop(_doc_key(doc), None)  # a reused title must not inherit an old shape
     return {"created": try_call(doc, "GetTitle"),
             "next": "Build the base shape first (make_box or make_cylinder), then add or cut features."}

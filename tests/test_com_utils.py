@@ -32,6 +32,36 @@ def test_call_rejects_args_on_property():
         call(NoTypeInfoStyle(), "GetTitle", 1)
 
 
+class FakeOle:
+    def __init__(self):
+        self.calls = []
+
+    def GetIDsOfNames(self, name):
+        return 77
+
+    def Invoke(self, dispid, lcid, flags, want_result, *args):
+        import pythoncom
+
+        self.calls.append((dispid, flags, args))
+        assert flags == pythoncom.DISPATCH_METHOD
+        return ("point", *args)
+
+
+class MethodSeenAsProperty:
+    """pywin32 evaluated CreatePoint as a property (the value is not a function)."""
+
+    CreatePoint = None
+
+    def __init__(self):
+        self._oleobj_ = FakeOle()
+
+
+def test_call_falls_back_to_invoke_for_methods_with_args():
+    obj = MethodSeenAsProperty()
+    assert call(obj, "CreatePoint", 1.0, 2.0) == ("point", 1.0, 2.0)
+    assert obj._oleobj_.calls[0][0] == 77
+
+
 def test_try_call_defaults():
     assert try_call(None, "GetTitle", default="x") == "x"
     assert try_call(NoTypeInfoStyle(), "Missing", default=3) == 3

@@ -7,7 +7,8 @@ import pytest
 from sw_mcp.core.errors import Code, SwError
 from sw_mcp.sw import modeling as m
 from sw_mcp.tools.modeling import (
-    finish_edges, get_model_summary, make_box, make_cylinder, make_prism, new_part, undo_last_feature,
+    finish_edges, get_model_summary, make_box, make_cylinder, make_prism, new_part, repeat_last_shape,
+    repeat_last_shape_around, undo_last_feature,
 )
 from tests.conftest import parse
 from tests.fakes.fake_modeler import FakePart
@@ -71,6 +72,7 @@ def test_edge_filters():
 # ---------------------------------------------------------------- tools against the fake part
 @pytest.fixture
 def part(fake_app, monkeypatch):
+    monkeypatch.setattr(m, "_last_group", {})
     doc = FakePart()
     fake_app.ActiveDoc = doc
     return doc
@@ -176,3 +178,78 @@ def test_undo_and_summary(part):
 
 def test_undo_with_nothing_built(part):
     assert parse(undo_last_feature())["error"] == Code.NOT_FOUND
+
+
+# ---------------------------------------------------------------- repeats
+def test_translated_and_rotated_math():
+    hole = m.cylinder_shape(35, -1, 0, 35, 11, 0, 8, cut=True)
+    moved = m.translated(hole, 10, 5, -3)
+    assert moved.profile.points == [(45, -3)] and (moved.start, moved.end) == (4, 16)
+    quarter = m.rotated(hole, 90, (0, 0, 0))  # right-hand about +Y: +X goes to -Z
+    (x, z), = quarter.profile.points
+    assert abs(x) < 1e-9 and abs(z + 35) < 1e-9
+    front = m.cylinder_shape(10, 0, 0, 10, 0, 5, 4, cut=False)  # along Z: +X goes to +Y
+    (x, y), = m.rotated(front, 90, (0, 0, 0)).profile.points
+    assert abs(x) < 1e-9 and abs(y - 10) < 1e-9
+
+
+def test_repeat_row_of_holes(part):
+    plate()
+    parse(make_cylinder(mode="cut", start_x_mm=-22, start_y_mm=-1, start_z_mm=0,
+                        end_x_mm=-22, end_y_mm=11, end_z_mm=0, diameter_mm=5))
+    out = parse(repeat_last_shape(copies=3, step_x_mm=15))
+    assert out["ok"] and out["features"] == ["Hole2", "Hole3", "Hole4"]
+    centers = [(part.FeatureByName(n).box[0][0] + part.FeatureByName(n).box[1][0]) / 2 for n in out["features"]]
+    assert [round(c, 6) for c in centers] == [-7, 8, 23]
+
+
+def test_repeat_around_bolt_circle(part):
+    parse(make_cylinder(mode="add", start_x_mm=0, start_y_mm=0, start_z_mm=0,
+                        end_x_mm=0, end_y_mm=10, end_z_mm=0, diameter_mm=90))
+    parse(make_cylinder(mode="cut", start_x_mm=35, start_y_mm=-1, start_z_mm=0,
+                        end_x_mm=35, end_y_mm=11, end_z_mm=0, diameter_mm=8))
+    out = parse(repeat_last_shape_around(copies=5, angle_step_deg=60))
+    assert out["ok"] and len(out["features"]) == 5
+    for name in out["features"]:
+        lo, hi = part.FeatureByName(name).box
+        cx, cz = (lo[0] + hi[0]) / 2, (lo[2] + hi[2]) / 2
+        assert abs(math.hypot(cx, cz) - 35) < 1e-6
+
+
+def test_repeat_needs_a_shape_and_valid_steps(part):
+    assert parse(repeat_last_shape(copies=2, step_x_mm=10))["error"] == Code.NOT_FOUND
+    plate()
+    assert parse(repeat_last_shape(copies=2))["error"] == Code.BAD_ARGUMENT
+    assert parse(repeat_last_shape_around(copies=8, angle_step_deg=60))["error"] == Code.BAD_ARGUMENT
+
+
+def test_repeat_reports_partial_progress(part):
+    plate()
+    parse(make_cylinder(mode="cut", start_x_mm=0, start_y_mm=-1, start_z_mm=0,
+                        end_x_mm=0, end_y_mm=11, end_z_mm=0, diameter_mm=5))
+    out = parse(repeat_last_shape(copies=5, step_x_mm=20))  # copy 2 (x=40) is outside the plate
+    assert out["error"] == Code.SW_ERROR and "Copy 2 of 5" in out["message"] and "made: Hole2." in out["message"]
+
+
+def test_repeat_group_makes_a_grid(part):
+    plate()
+    parse(make_cylinder(mode="cut", start_x_mm=-22, start_y_mm=-1, start_z_mm=-12,
+                        end_x_mm=-22, end_y_mm=11, end_z_mm=-12, diameter_mm=6))
+    row = parse(repeat_last_shape(copies=1, step_x_mm=44))
+    assert row["features"] == ["Hole2"] and row["group_size"] == 2
+    grid = parse(repeat_last_shape(copies=1, step_z_mm=24))
+    assert grid["features"] == ["Hole3", "Hole4"] and grid["group_size"] == 4
+    centers = sorted(((f.box[0][0] + f.box[1][0]) / 2, (f.box[0][2] + f.box[1][2]) / 2)
+                     for f in part.features if f.Name.startswith("Hole"))
+    assert [(round(x), round(z)) for x, z in centers] == [(-22, -12), (-22, 12), (22, -12), (22, 12)]
+
+
+def test_new_shape_resets_the_group(part):
+    plate()
+    parse(make_cylinder(mode="cut", start_x_mm=-22, start_y_mm=-1, start_z_mm=0,
+                        end_x_mm=-22, end_y_mm=11, end_z_mm=0, diameter_mm=4))
+    parse(repeat_last_shape(copies=1, step_x_mm=10))
+    parse(make_cylinder(mode="cut", start_x_mm=20, start_y_mm=-1, start_z_mm=10,
+                        end_x_mm=20, end_y_mm=11, end_z_mm=10, diameter_mm=4))
+    out = parse(repeat_last_shape(copies=1, step_z_mm=-20))
+    assert out["features"] == ["Hole4"] and out["group_size"] == 2

@@ -151,7 +151,16 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - **Agent:** it now plans (numbered plan with coordinates, worked example), `steps: 40`, and the order is base → added shapes → outer fillets → pockets/holes.
   - **Tests:** a fake modeler (`tests/fakes/fake_modeler.py`) with knobs `reverse_convention` / `mirror_second_axis` proves the self-correction. 78 tests pass.
   - **Smoke test:** `build_checks()` builds a plate with an R3 fillet, 4 holes, a pocket, a boss, a prism cut and an undo, and checks the volumes (expected about 20.9k mm³).
-- [ ] **Waiting on the user:** run the smoke test again (the build section is new and unverified on real SolidWorks), then try the build prompts B1–B4 in docs/model-test-prompts.md.
+- [x] **Smoke test on real SolidWorks: 28/29.** The whole build section worked, and the volumes matched. Findings, all fixed in the next commit:
+  - The fillet selected only 3 of 4 edges: SelectByID2 point picking misses hidden edges. Edges are now selected as objects (`Select4`, then `Select2`, then a point pick).
+  - `IMathUtility.CreatePoint` came back as a "property" under late binding. `com_utils.call()` now falls back to a raw `IDispatch.Invoke(DISPATCH_METHOD)` for any method called with arguments. The fallback table was correct anyway (no mirroring was needed).
+  - Measured conventions: a boss uses reverse=False for +normal; a **cut needs reverse=True**. The first guess is now `reverse = shape.cut`, so there are fewer retries.
+- [x] **Batch 1 (repeats) done:**
+  - `repeat_last_shape(copies, step_x/y/z)` and `repeat_last_shape_around(copies, angle_step_deg, center)`.
+  - A repeat copies the **last group** (`_last_group` per document), so a grid takes 2 calls. Each copy goes through the verified `build()`, and on failure the tool reports partial progress.
+  - The smoke test now uses repeats for the corner holes, and adds a flange (bolt circle + row of pins) with volume checks. 86 tests pass.
+- [ ] **Roadmap toward "make a V4 engine" (the user wants complex builds):** batch 2 angled cylinders/boxes (any direction) → batch 3 revolve → batch 4 assemblies (save parts, new assembly, place parts at position + angle) → batch 5 a big-job agent mode (parts list, build part by part into a project folder, higher step limit, resumable plan).
+- [ ] Waiting on the user: run the smoke test again to check the fixes plus repeats.
 - **Unverified on real SolidWorks:** MathUtility.CreatePoint with a VT_R8 array, FeatureCut4/FeatureExtrusion3 with a start offset, FeatureFillet3 with None arrays, IPartDoc methods (GetBodies2/GetPartBox) through late binding, IFeature.GetFaces, and IFace2.GetBox.
 
 ### Next batch after the smoke report

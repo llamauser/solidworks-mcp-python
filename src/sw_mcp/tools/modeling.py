@@ -91,6 +91,46 @@ def make_prism(
     return m.Modeler(sw.app, sw.doc).build(m.prism_shape(axis, points_mm, start_mm, end_mm, mode == "cut"))
 
 
+@sw_tool(needs="part", timeout=600)
+def repeat_last_shape(
+    sw: Session,
+    copies: Annotated[int, Field(ge=1, le=m.MAX_COPIES, description="How many NEW copies to add.")],
+    step_x_mm: _mm("Shift between copies along X.") = 0.0,
+    step_y_mm: _mm("Shift between copies along Y.") = 0.0,
+    step_z_mm: _mm("Shift between copies along Z.") = 0.0,
+) -> dict:
+    """Copy the last shape in a straight row. After a repeat, the next repeat copies the whole
+    group, so two calls make a grid.
+
+    Use when: rows or grids of holes, ribs, fins, slots.
+    Each copy is shifted by the step from the previous one. Cuts stay cuts.
+    Example, 4 corner holes: make the hole at x=-22 z=-12, then
+      repeat_last_shape(copies=1, step_x_mm=44), then repeat_last_shape(copies=1, step_z_mm=24)
+    """
+    modeler = m.Modeler(sw.app, sw.doc)
+    return modeler.repeat_linear(copies, step_x_mm, step_y_mm, step_z_mm)
+
+
+@sw_tool(needs="part", timeout=600)
+def repeat_last_shape_around(
+    sw: Session,
+    copies: Annotated[int, Field(ge=1, le=m.MAX_COPIES, description="How many NEW copies to add.")],
+    angle_step_deg: _mm("Angle between neighbours in degrees (360/N for N evenly spaced)."),
+    center_x_mm: _mm("Circle center X.") = 0.0,
+    center_y_mm: _mm("Circle center Y.") = 0.0,
+    center_z_mm: _mm("Circle center Z.") = 0.0,
+) -> dict:
+    """Copy the last shape (or last repeated group) around a circle.
+
+    Use when: bolt circles, spokes, fins, holes around a flange. The circle turns around a line through the center, parallel to the last shape's axis
+    (a hole drilled along Y turns around a vertical line).
+    Example, 6 holes on a 70 mm bolt circle: make the hole at x=35, z=0 along Y, then
+      repeat_last_shape_around(copies=5, angle_step_deg=60)
+    """
+    modeler = m.Modeler(sw.app, sw.doc)
+    return modeler.repeat_around(copies, angle_step_deg, (center_x_mm, center_y_mm, center_z_mm))
+
+
 @sw_tool(needs="part", timeout=120)
 def finish_edges(
     sw: Session,
@@ -150,6 +190,8 @@ def register(mcp) -> None:
     mcp.tool(structured_output=False, annotations=build)(make_box)
     mcp.tool(structured_output=False, annotations=build)(make_cylinder)
     mcp.tool(structured_output=False, annotations=build)(make_prism)
+    mcp.tool(structured_output=False, annotations=build)(repeat_last_shape)
+    mcp.tool(structured_output=False, annotations=build)(repeat_last_shape_around)
     mcp.tool(structured_output=False, annotations=build)(finish_edges)
     mcp.tool(structured_output=False, annotations=ToolAnnotations(destructive_hint=True))(undo_last_feature)
     mcp.tool(structured_output=False, annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True))(

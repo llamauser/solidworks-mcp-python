@@ -15,19 +15,46 @@ from typing import Any
 import pythoncom
 import pywintypes
 import win32com.client
+import win32com.client.dynamic
 
 _FUNCTION_TYPES = (MethodType, FunctionType, BuiltinMethodType, partial)
 
 
 def call(obj: Any, name: str, *args: Any) -> Any:
     """Call method `name` or read property `name`, whichever pywin32 hands back."""
+    if args:
+        # Without type info, pywin32 may evaluate a method as a zero-argument property
+        # (seen with IMathUtility.CreatePoint). Methods with arguments therefore fall back
+        # to a direct IDispatch method call when attribute access did not give a function.
+        try:
+            attr = getattr(obj, name)
+        except (pywintypes.com_error, AttributeError):
+            return invoke_method(obj, name, *args)
+        if isinstance(attr, _FUNCTION_TYPES):
+            return attr(*args)
+        return invoke_method(obj, name, *args)
     attr = getattr(obj, name)
     # COM results (CDispatch) are callable too, so test for real Python functions only.
     if isinstance(attr, _FUNCTION_TYPES):
-        return attr(*args)
-    if args:
-        raise TypeError(f"{name} is a property here, it cannot take arguments")
+        return attr()
     return attr
+
+
+def invoke_method(obj: Any, name: str, *args: Any) -> Any:
+    """Call a COM method by name through raw IDispatch (DISPATCH_METHOD), wrapping results."""
+    ole = getattr(obj, "_oleobj_", None)
+    if ole is None:
+        raise TypeError(f"{name} is a property here, it cannot take arguments")
+    dispid = ole.GetIDsOfNames(name)
+    return _wrap(ole.Invoke(dispid, 0, pythoncom.DISPATCH_METHOD, True, *args))
+
+
+def _wrap(value: Any) -> Any:
+    if isinstance(value, pythoncom.TypeIIDs[pythoncom.IID_IDispatch]):
+        return win32com.client.dynamic.Dispatch(value)
+    if isinstance(value, tuple):
+        return tuple(_wrap(v) for v in value)
+    return value
 
 
 def try_call(obj: Any, name: str, *args: Any, default: Any = None) -> Any:
