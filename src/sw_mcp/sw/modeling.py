@@ -381,6 +381,19 @@ class Modeler:
     def __init__(self, app: Any, doc: Any) -> None:
         self.app = app
         self.doc = doc
+        self.title = try_call(doc, "GetTitle")
+
+    def ensure_active(self) -> None:
+        """Sketches and features go to the ACTIVE window. If the user clicked another part while a
+        build runs, bring ours back first."""
+        active = try_call(self.app, "ActiveDoc")
+        if not self.title or (active is not None and try_call(active, "GetTitle") == self.title):
+            return
+        log.info("active window changed to %s; switching back to %s", try_call(active, "GetTitle"), self.title)
+        try:
+            call_with_out_ints(self.app, "ActivateDoc3", self.title, False, 0, n_out=1)
+        except Exception:  # noqa: BLE001 - older API
+            try_call(self.app, "ActivateDoc", self.title)
 
     # ---------------------------------------------------------------- reading the part
     def bodies(self) -> list:
@@ -515,6 +528,7 @@ class Modeler:
               circle: tuple[list[float], float] | None = None,
               centerline: tuple[list[float], list[float]] | None = None) -> tuple[Any, str]:
         """Draw on the default plane whose normal is `plane_axis`. Points are world mm."""
+        self.ensure_active()
         self.exit_sketch()
         plane = self.default_planes()[PLANE_INDEX[plane_axis]]
         self.select_only(plane)
@@ -615,8 +629,19 @@ class Modeler:
                     feature = self._extrude(shape, sketch_feat, reverse, flip, merge)
                 except Exception as exc:  # noqa: BLE001 - a rejected direction is just a failed attempt
                     log.info("extrude attempt failed: %s", exc)
-                tried.append(f"reverse={reverse} flip={flip} sketch={how} -> {'feature' if feature else 'none'}")
-                if feature is not None and placement_ok(shape, self._face_boxes(feature)):
+                boxes = self._face_boxes(feature) if feature is not None else []
+                tried.append(f"reverse={reverse} flip={flip} sketch={how} -> "
+                             f"{f'feature({len(boxes)} faces)' if feature is not None else 'none'}")
+                if feature is not None and not boxes and not shape.cut:
+                    self.delete(feature)
+                    log.warning("shape made but it has no faces of its own: %s; %s", shape, tried)
+                    raise SwError(
+                        Code.SW_ERROR,
+                        f"SolidWorks made the {shape.label.lower()} but it has no faces of its own: it is either "
+                        "completely inside the part, or only touches it along a face or an edge (zero thickness).",
+                        "Move or resize it so it clearly overlaps the part (by at least 0.5 mm), or leave a clear gap.",
+                    )
+                if feature is not None and placement_ok(shape, boxes):
                     log.info("built %s %s..%s along %s; attempts: %s",
                              shape.label, shape.start, shape.end, shape.axis, "; ".join(tried))
                     return feature
@@ -674,11 +699,20 @@ class Modeler:
         ext = call(self.doc, "Extension")
         return bool(call(ext, "SelectByID2", name, "SOLIDBODY", 0.0, 0.0, 0.0, append, mark, null_dispatch(), 0))
 
-    def _rotate_body(self, name: str, shape: Shape) -> Any:
+    def _tool_body_name(self, before: list[str]) -> str | None:
+        """The one body that is not part of the original part. SolidWorks renames a body after
+        each feature that changes it (e.g. Move/Copy), so it cannot be tracked by name."""
+        new = [n for n in self._body_names() if n not in before]
+        return new[0] if len(new) == 1 else None
+
+    def _rotate_body(self, before: list[str], shape: Shape) -> tuple[Any, str]:
         axis, deg, about = shape.tilt  # type: ignore[misc]
         expected = tilted_box(shape)
         fm = call(self.doc, "FeatureManager")
         for sign in (1.0, -1.0):  # right-hand rule first; the other sign if this SolidWorks disagrees
+            name = self._tool_body_name(before)
+            if name is None:
+                raise SwError(Code.SW_ERROR, "Lost track of the tilted shape's body.", "Build it without rotate.")
             call(self.doc, "ClearSelection2", True)
             if not self._select_body(name, False, 1):
                 raise SwError(Code.SW_ERROR, "SolidWorks could not select the new body to tilt it.", "Try again.")
@@ -686,10 +720,12 @@ class Modeler:
             angles[AXIS_INDEX[axis]] = math.radians(deg) * sign
             feature = call(fm, "InsertMoveCopyBody2", 0.0, 0.0, 0.0, 0.0,
                            about[0] / 1000, about[1] / 1000, about[2] / 1000, *angles, False, 1)
-            box = self._body_box(name)
+            moved = self._tool_body_name(before)
+            box = self._body_box(moved) if moved else None
+            log.info("tilt sign=%s: feature=%s body %s -> %s, box %s, expected %s", sign, feature is not None,
+                     name, moved, box, expected)
             if feature is not None and box is not None and boxes_match(box, expected):
-                return feature
-            log.info("tilt attempt sign=%s gave %s, expected %s", sign, box, expected)
+                return feature, moved  # type: ignore[return-value]
             self.delete(feature)
         raise SwError(Code.SW_ERROR, "SolidWorks did not tilt the shape as expected.",
                       "Check the rotate axis and angle; or build the shape without rotate.")
@@ -734,13 +770,13 @@ class Modeler:
         created: list[Any] = []
         try:
             created.append(self._place(tool, merge=False))
-            new = [n for n in self._body_names() if n not in before]
-            if len(new) != 1:
+            if self._tool_body_name(before) is None:
                 raise SwError(Code.SW_ERROR, "SolidWorks did not make the tilted shape as a separate body.",
                               "Build the shape without rotate.")
-            created.append(self._rotate_body(new[0], shape))
+            move, tool_name = self._rotate_body(before, shape)
+            created.append(move)
             if before:
-                created.append(self._combine(self._main_body(before), new[0], shape.cut))
+                created.append(self._combine(self._main_body(before), tool_name, shape.cut))
         except BaseException:
             for feature in reversed(created):
                 self.delete(feature)
@@ -881,6 +917,7 @@ class Modeler:
         if not chosen:
             raise SwError(Code.NOT_FOUND, f"No edges match '{which}'.",
                           "Use another choice, or call get_model_summary to see the part.")
+        self.ensure_active()
         self.exit_sketch()
         call(self.doc, "ClearSelection2", True)
         picked = sum(1 for edge, info in chosen if self._select_edge(edge, info))

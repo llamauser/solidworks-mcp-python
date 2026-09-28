@@ -170,3 +170,20 @@ def test_split_name():
     assert pr.split_name("V4 engine/crankshaft") == ("V4 engine", "crankshaft")
     assert pr.split_name("bracket.SLDPRT") == ("Unsorted", "bracket")
     assert pr.split_name(r"V4\piston") == ("V4", "piston")
+
+
+def test_body_renamed_after_move_is_still_found(app):
+    # the fake renames a moved body like SOLIDWORKS does ("Body-Move/Copy<n>")
+    out = parse(build_part(plan=json.dumps({"steps": [BLOCK, bore(30)]})))
+    assert out["ok"] and not app.created[-1].extra_bodies
+
+
+def test_broken_shape_is_reported_after_one_attempt(app):
+    parse(build_part(plan=json.dumps({"steps": [BLOCK]})))
+    part = app.created[-1]
+    part.broken_bosses = True
+    out = parse(build_part(plan=json.dumps({"steps": [
+        {"op": "cylinder", "start": [0, 50, 0], "end": [0, 60, 0], "diameter": 10}]}), start_new_part=False))
+    assert out["error"] == Code.SW_ERROR and "zero thickness" in out["message"] and "0.5 mm" in out["fix"]
+    assert part.sketch_count == 2  # the base plus ONE attempt, not eight
+    assert all(f.GetTypeName2() != "ICE" or f.Name == "Box1" for f in part.features)  # attempt deleted

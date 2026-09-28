@@ -243,7 +243,22 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - `sw-agent logs` now opens Explorer with the zip selected (`explorer /select,`) and copies the path (`clip`).
   - install.ps1 creates two desktop shortcuts (the assistant + Tools). All .bat files are CRLF.
 
-**ALL PHASES (P1–P6) BUILT. NEXT: the user tests on the SolidWorks PC.**
+- [x] **User log zip 2026-09-28 07:33: smoke test 38/43 passed.**
+  - Working on real SW:
+    - `sketch=transform` first try everywhere (the CreatePoint fix works, no retries);
+    - the fillet now selects 4/4 edges;
+    - revolve gives the exact disc volume;
+    - build_part flange matches the plan exactly;
+    - project save_as works.
+    The user had built a "V4 engine.SLDASM" before logging existed.
+  - Fixed after this report:
+    - (a) The one-tool-at-a-time flange steps went into the wrong part because SW's active window changed mid-run (probably a user click) → `Modeler.ensure_active()` re-activates the build's document before every sketch and before fillets.
+    - (b) The tilt failed because SW RENAMES a body after Move/Copy → the tool body is now found by elimination (`_tool_body_name(before)`), and the fake renames too.
+    - (c) The smoke test crashed at make_assembly because `name` clashed with the step()/tool() parameters → renamed to tool_name. make_assembly has still never run on real SW.
+    - (d) The old 05:00 OpenCode session had many bosses fail 8× with features but no passing placement (12–48 s each) → a boss with 0 faces is now reported after ONE attempt as "inside the part or zero-thickness contact". The faces count is logged per attempt.
+  - 153 tests pass.
+
+**ALL PHASES (P1–P6) BUILT. NEXT: the user re-runs Tools menu option 3 and sends the zip.**
 1. `git pull`, then double-click `Install SolidWorks Assistant.bat` (connect providers, create the shortcut).
 2. `.venv\Scripts\python scripts\smoke_test.py` and send the report. Phase 5 real-SW calls are unverified: InsertMoveCopyBody2, InsertCombineFeature, FeatureRevolve2 + CreateCenterLine, AddComponent5 placement.
 3. `sw-agent bench`, then the desktop shortcut (browser UI) with prompts B1–B6.

@@ -47,8 +47,8 @@ def short(obj, n: int = 600) -> str:
     return text if len(text) <= n else text[: n - 3] + "..."
 
 
-async def tool(client: Client, name: str, **args) -> dict:
-    res = await client.call_tool(name, args)
+async def tool(client: Client, tool_name: str, **args) -> dict:
+    res = await client.call_tool(tool_name, args)
     text = res.content[0].text if res.content else "{}"
     try:
         return json.loads(text)
@@ -235,9 +235,10 @@ async def run(args) -> None:
 
 
 async def build_checks(client: Client, work: str) -> None:
-    """Build a part from scratch with the modeling tools and check every result."""
-    async def step(label: str, name: str, check=None, **args) -> dict:
-        out = await tool(client, name, **args)
+    """Build a part from scratch with the modeling tools and check every result.
+    (Do not click in SolidWorks while this runs: single-shape tools act on the active window.)"""
+    async def step(label: str, tool_name: str, check=None, **args) -> dict:
+        out = await tool(client, tool_name, **args)
         ok = out.get("ok") and (check is None or check(out))
         record(f"build: {label}", "PASS" if ok else "FAIL", short(out, 400))
         return out

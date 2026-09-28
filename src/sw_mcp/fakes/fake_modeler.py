@@ -291,7 +291,7 @@ class FakeFeatureManager:
                 return None  # "the cut does not intersect the model"
         doc.feature_count += 1
         feat = FakeFeature(doc, f"{'Cut' if cut else 'Boss'}-Extrude{doc.feature_count}", "ICE" if not cut else "Cut")
-        feat.faces = [FakeBoxFace(lo, hi)]
+        feat.faces = [] if (doc.broken_bosses and not cut) else [FakeBoxFace(lo, hi)]
         feat.box = (lo, hi)
         length = e - s
         if cut:
@@ -334,7 +334,14 @@ class FakeFeatureManager:
         body.points = [_rotate(p, (ax * k, ay * k, az * k), pivot) for p in old]
         doc.feature_count += 1
         feat = FakeFeature(doc, f"Body-Move/Copy{doc.feature_count}", "MoveCopyBody")
-        feat.undo = lambda: setattr(body, "points", old)
+        old_name = body.Name
+        body.Name = feat.Name
+
+        def undo() -> None:
+            body.points = old
+            body.Name = old_name
+
+        feat.undo = undo
         doc.features.append(feat)
         doc.selected = []
         return feat
@@ -460,6 +467,7 @@ class FakePart:
         self.reverse_convention = False
         self.mirror_second_axis = False
         self.rotation_sign = 1.0  # -1 makes the fake rotate the other way than the server expects
+        self.broken_bosses = False  # True: bosses come out with no faces (zero-thickness contact)
         self.extra_bodies: list = []
         self.body_count = 1
         self.path = ""
