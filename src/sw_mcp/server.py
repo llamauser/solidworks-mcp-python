@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from mcp.server import MCPServer
 
-from . import __version__
+from . import __version__, config
 from .tools import register_all
 
 INSTRUCTIONS = """\
@@ -18,7 +18,8 @@ If ok is false, read "fix" and follow it. After any error, call get_status.
 
 
 def create_server() -> MCPServer:
-    mcp = MCPServer("solidworks", instructions=INSTRUCTIONS, version=__version__)
+    instructions = INSTRUCTIONS if config.SEND_INSTRUCTIONS else None
+    mcp = MCPServer("solidworks", instructions=instructions, version=__version__)
     register_all(mcp)
     return mcp
 

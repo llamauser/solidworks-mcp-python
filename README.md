@@ -27,15 +27,33 @@ installs.
 
 ## Using it from OpenCode
 
-Run `opencode` in this folder. It reads `opencode.json` and starts the server itself over stdio.
-In this folder, `opencode.json` restricts the default **build** agent to the SolidWorks tools.
-Shell and file editing are denied, so the model cannot drift into writing its own COM scripts.
-The working rules for the model are in `AGENTS.md`, which OpenCode loads automatically.
-Pick a model and ask, for example:
+The setup uses free models through **OpenRouter**. Connect it once with `opencode auth login`
+and pick OpenRouter; this needs an OpenRouter account and API key.
+
+Run `opencode` in this folder. It reads `opencode.json`, starts the server over stdio, and opens
+the **solidworks** agent (`.opencode/agents/solidworks.md`) by default. The agent:
+- uses `openrouter/qwen/qwen3.8-27b:free`. To try another free model, change the `model:`
+  line in the agent file; free OpenRouter model IDs end in `:free`.
+- can only use the SolidWorks tools. Every built-in OpenCode tool (shell, file edits, web…) is
+  denied, so the model cannot drift into writing its own COM scripts.
+- uses a short system prompt of its own instead of OpenCode's long coding prompt.
+
+Ask, for example:
 
 > What is open in SolidWorks? … *(click a face)* … make this 5 mm thicker and export a STEP to C:\Temp\part.step
 
 To compare the free models, use [docs/model-test-prompts.md](docs/model-test-prompts.md).
+
+**Keeping usage low.** On OpenRouter's free models, every model turn counts as one request, and
+each tool call adds a turn. The daily request limit is small unless the account has bought
+credits; check OpenRouter's current limits. This setup is tuned to use few requests:
+- **Agent:** it calls `get_status` only at the start and after errors, stops after 12 steps,
+  and answers in one or two sentences.
+- **OpenCode config:** `compaction.prune` drops old tool outputs from the history, and
+  `small_model` sends session-title requests to a tiny free model.
+- **Server:** it sends no connect-time instructions (`SW_MCP_INSTRUCTIONS=0`), because the
+  agent file already carries the rules.
+- **Sessions:** start a new one for each new task, so old history isn't re-sent every turn.
 
 ## Tools
 
@@ -77,6 +95,7 @@ Every answer is minified JSON, either `{"ok":true,...}` or
 | `SW_MCP_BREAKER_THRESHOLD` | 3 | Connection failures before tools fail fast |
 | `SW_MCP_BREAKER_COOLDOWN` | 20 | Seconds tools fail fast before retrying |
 | `SW_MCP_AUTO_LAUNCH` | 1 | Let `get_status` start SolidWorks when it is not running |
+| `SW_MCP_INSTRUCTIONS` | 0 | Send workflow instructions at connect time (for clients without an agent prompt) |
 | `SW_MCP_LOG` | `%LOCALAPPDATA%\sw_mcp\sw_mcp.log` | Log file (stdout is never used: it carries the protocol) |
 
 To set these, add an `"environment": {...}` block to the server entry in `opencode.json`.
@@ -85,13 +104,14 @@ OpenCode `"type": "remote"` entry with `"url": "http://127.0.0.1:8765/mcp"`.
 
 ## Troubleshooting
 
-- **"OpenCode's free tier can only be used from within OpenCode".** This is an OpenCode bug
+- **"OpenCode's free tier can only be used from within OpenCode".** You picked one of
+  OpenCode's own free models (the "Free" ones in OpenCode's list), not an OpenRouter model.
+  OpenCode's free tier currently rejects custom agents and MCP setups
   ([anomalyco/opencode#50806](https://github.com/anomalyco/opencode/issues/50806),
-  [#49592](https://github.com/anomalyco/opencode/issues/49592)): free models only accept requests
-  from the built-in `build` agent with OpenCode's own system prompt. That is why this project
-  never replaces the agent prompt: the rules live in `AGENTS.md`, and `opencode.json` only
-  sets tool permissions. Session titles and auto-compaction can hit the same error on free
-  models; start a new session when a long one stops.
+  [#49580](https://github.com/anomalyco/opencode/issues/49580)). Use an `openrouter/...:free`
+  model instead.
+- **HTTP 429 or "rate limit" from OpenRouter.** You hit the free requests-per-minute or
+  requests-per-day limit. Wait, or add credits to the OpenRouter account.
 
 - **`SW_STARTING` never ends.** SolidWorks is running but not visible to COM. Close any
   dialog box in SolidWorks. Then check that SolidWorks and OpenCode run as the same Windows

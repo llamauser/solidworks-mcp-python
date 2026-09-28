@@ -35,6 +35,11 @@ BUSY_RETRY_DELAY_S = _float("SW_MCP_BUSY_RETRY_DELAY", 1.0)
 # get_status may start SolidWorks when no SLDWORKS.exe process exists.
 AUTO_LAUNCH = _bool("SW_MCP_AUTO_LAUNCH", True)
 
+# Send MCP server instructions at connect time. Off by default: OpenCode gets the same
+# rules from AGENTS.md, and extra system-prompt text is suspected of tripping OpenCode's
+# free-tier check.
+SEND_INSTRUCTIONS = _bool("SW_MCP_INSTRUCTIONS", False)
+
 # Never log to stdout: stdout is the MCP stdio channel.
 LOG_FILE = os.environ.get("SW_MCP_LOG") or os.path.join(
     os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "sw_mcp", "sw_mcp.log"

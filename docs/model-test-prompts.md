@@ -1,7 +1,7 @@
-# Comparing the free OpenCode models
+# Comparing free models
 
-Run these five prompts with each model, using the default **build** agent in this folder.
-`opencode.json` locks that agent to the SolidWorks tools.
+Run these five prompts with each model, using the **solidworks** agent (the default in this folder).
+To switch models, edit the `model:` line in `.opencode/agents/solidworks.md`.
 Start each model from the same state: SolidWorks open, the smoke-test block (or any simple part)
 open, and nothing selected. Mark a prompt as a pass only if the model called the expected tools
 and reported the numbers the tools actually returned.
@@ -17,16 +17,19 @@ and reported the numbers the tools actually returned.
 Watch for these failure patterns:
 - **Wrong units:** it passes meters (0.015) instead of millimeters (15). The server flags suspicious jumps in a `warning` field.
 - **Invented names:** it guesses `D1@Extrude1` instead of copying the name from `dims`.
-- **Code instead of tools:** it tries to write a script. The config blocks bash and edit, but note it anyway.
+- **Code instead of tools:** it tries to write a script. The agent blocks shell and file tools, but note it anyway.
 - **Retry loops:** it repeats the same failing call instead of following `fix`.
 
 ## Scorecard
 
 | Model | 1 | 2 | 3 | 4 | 5 | Notes |
 |-------|---|---|---|---|---|-------|
-| MiMo-V2.6-Flash | | | | | | |
-| Muse Spark 1.3 | | | | | | |
-| Ling 3.0 Flash | | | | | | |
-| Nemotron 3.5 Lightning | | | | | | |
-| Nemotron 3 Ultra | | | | | | |
-| Big Pickle | | | | | | |
+| openrouter/qwen/qwen3.8-27b:free (default) | | | | | | |
+| openrouter/nvidia/nemotron-3-super-120b-a12b:free | | | | | | |
+| openrouter/nvidia/nemotron-3.5-lightning:free | | | | | | |
+| openrouter/google/gemma-4-31b-it:free | | | | | | |
+| openrouter/inclusionai/ling-3.0-flash-fin:free | | | | | | |
+| openrouter/thinkingmachines/inkling-small:free | | | | | | |
+
+These are free OpenRouter models that supported tool calling on 2026-09-28. The list changes
+often, so check openrouter.ai/models (filter: free, tools) for the current one.

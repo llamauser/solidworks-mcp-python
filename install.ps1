@@ -22,24 +22,18 @@ $escaped = $py.Replace('\', '\\')
 $json = @"
 {
   "`$schema": "https://opencode.ai/config.json",
+  "default_agent": "solidworks",
+  "small_model": "openrouter/liquid/lfm-2.5-2.6b:free",
+  "share": "disabled",
+  "compaction": {
+    "prune": true
+  },
   "mcp": {
     "solidworks": {
       "type": "local",
       "command": ["$escaped", "-m", "sw_mcp"],
       "enabled": true,
       "timeout": 10000
-    }
-  },
-  "agent": {
-    "build": {
-      "permission": {
-        "bash": "deny",
-        "edit": "deny",
-        "webfetch": "deny",
-        "websearch": "deny",
-        "task": "deny",
-        "solidworks_*": "allow"
-      }
     }
   }
 }
@@ -56,5 +50,5 @@ Write-Host "  1. Open SolidWorks (or let the smoke test start it)."
 Write-Host "  2. Run the end-to-end check:   .venv\Scripts\python scripts\smoke_test.py"
 Write-Host "     and send back smoke_test_report.txt"
 Write-Host "  3. Start OpenCode in this folder:   opencode"
-Write-Host "     Use the default 'build' agent (in this folder it is locked to the SolidWorks tools), pick a model, and ask:"
+Write-Host "     The 'solidworks' agent opens by default (OpenRouter, Qwen3.8 27B free). Ask:"
 Write-Host "     'What version of SolidWorks is running?'"

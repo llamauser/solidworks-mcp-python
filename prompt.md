@@ -135,7 +135,14 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
   - Verified: `IFace2.Normal` points **out of the material** (top face gives [0,1,0]). Opening, SaveAs export (STEP), Save, the `SystemValue` setter with rebuild, dimension naming (`D1@<feature>`), face and edge readback, and plane selection by tree position on a French install.
   - Still unverified: the selection-type readers for mates, components, dimensions and sketch entities (21, 20, 14, 10, 11), and assemblies in general.
 - [x] The `build` override with a custom `prompt` still failed with the same free-tier error. The free model **worked in another folder but not in this project**. Working theory: the free tier rejects requests whose system prompt is not OpenCode's own (custom agents, `title` and `compaction` fail for the same reason). **Change:** removed the `prompt` and `temperature` override. The rules moved to `AGENTS.md`, which OpenCode loads automatically, and `opencode.json` now only sets `agent.build.permission`.
-- [ ] Waiting on the user: does this config work? If not, bisect: (a) opencode.json with only the `mcp` block, (b) (a) plus AGENTS.md renamed away, (c) no opencode.json at all.
+- [x] Bisect result: OpenCode's free tier only worked with no opencode.json at all, meaning it rejects requests from sessions that have MCP tools attached. **The user switched to OpenRouter** (connected in OpenCode).
+- [x] **Current OpenCode setup (supersedes everything above):**
+  - The custom agent `.opencode/agents/solidworks.md` is restored: `mode: primary`, `model: openrouter/qwen/qwen3.8-27b:free`, temperature 0.1, `steps: 12`. It denies every built-in tool and allows `solidworks_*`, and uses its own short prompt.
+  - `opencode.json` (also written by install.ps1) sets `default_agent: solidworks`, `small_model: openrouter/liquid/lfm-2.5-2.6b:free`, `share: disabled`, `compaction.prune: true`, plus the mcp block.
+  - AGENTS.md was deleted; it would duplicate the agent prompt.
+  - The server no longer sends MCP `instructions` by default (`SW_MCP_INSTRUCTIONS=0`).
+  - Goal: few requests and tokens on OpenRouter's free limits.
+- [ ] Waiting on the user: test the solidworks agent via OpenRouter, then fill in the scorecard in docs/model-test-prompts.md.
 
 ### Next batch after the smoke report
 `new_part`, `create_sketch(plane: front|top|right)` (by tree position), `sketch_rectangle`, `sketch_circle`, `extrude`, `cut`, `fillet_selected_edges`, `list_mates`. `build_block()` in the smoke test is a working starting point for the modelling calls.
