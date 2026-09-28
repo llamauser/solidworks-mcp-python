@@ -7,10 +7,13 @@ name = "sw-mcp"
 version = "0.1.0"
 description = "SolidWorks MCP server (pure Python, pywin32) designed for small and free LLMs"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "mcp>=2.2,<3",
     "pywin32>=306",
+    "httpx>=0.27",
+    "keyring>=25",
+    "rich>=13",
 ]
 
 [project.optional-dependencies]
@@ -18,9 +21,14 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 sw-mcp = "sw_mcp.__main__:main"
+sw-agent = "sw_agent.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+sw_mcp = ["guide.md"]
+sw_agent = ["providers.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

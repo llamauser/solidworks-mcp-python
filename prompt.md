@@ -180,7 +180,22 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
 
 **Phase status:**
 - [x] **P1 done:** `src/sw_mcp/sw/plan.py` (pydantic Plan with ops box/cylinder/prism/fillet/chamfer/repeat/repeat_around, lenient JSON, errors naming the step, dry-run `check_plan`, `execute` with fail-fast, progress in the error, auto-close of the failed unsaved part, `expect` size/bodies check) and tool `build_part(plan, start_new_part)`. The agent prompt now uses build_part for new parts. The smoke test builds the flange from one plan. 103 tests pass.
-- [ ] P2 next: provider registry + setup wizard + keyring.
+- [x] **P2 done:** new package `src/sw_agent/`:
+  - `providers.toml`: data-driven provider list covering OpenRouter, Gemini, Groq, Mistral, NVIDIA, Cerebras, Hugging Face, LM Studio and Ollama. Each entry has base_url, key_url, offer, requires, privacy + note, model_prefs and model_filter.
+  - `registry.py`; `keys.py` (keyring → Windows Credential Manager; the env var SW_AGENT_KEY_<ID> overrides).
+  - `llm.py`: our own thin OpenAI-compatible httpx client. Errors are kinds: auth / rate_limit / unavailable / bad_request / network.
+  - `probe.py`: `rank_models` plus a one-request tool-call check with an add_numbers tool.
+  - `config.py`: %APPDATA%\sw_agent\config.json, with no secrets.
+  - `wizard.py`: rich UI. It shows the offer, needs and a privacy warning, then the user chooses; it opens key_url, takes a hidden paste, discovers and saves. It retries a wrong key 3 times and handles keep/test/replace/remove.
+  - `clients.py` + `__main__.py` (`sw-agent setup|status|connect|sync|chat`).
+  - **One guide for every app:** `src/sw_mcp/guide.md` is the single source. `sw-agent sync` generates `.opencode/agents/solidworks.md`, `.github/agents/solidworks.agent.md` (Copilot) and `GEMINI.md`, and a test checks they are current. The server sends the guide as MCP instructions when SW_MCP_INSTRUCTIONS=1.
+  - **Static configs:** `.vscode/mcp.json` (uses ${workspaceFolder}), `.gemini/settings.json`, `opencode.json` (now with a RELATIVE python path; install.ps1 no longer rewrites it, so git pull stops conflicting).
+  - `connect` merges into Claude Desktop's config (with a backup) and prints the generic mcpServers snippet.
+  - `install.ps1` now offers a winget Python install, runs the tests, then `sw-agent setup` (the `-SkipProviders` switch skips it).
+  - Deps added: httpx, keyring, rich. Requires Python >= 3.11.
+  - 116 tests pass. A live check listed 458 real OpenRouter models, and ranking picks nemotron-3-super first.
+- [ ] **Unverified:** does OpenCode resolve the relative `.venv\\Scripts\\python.exe` command? It should, since it spawns in the project folder. The fallback is `sw-agent connect` / an absolute path.
+- [ ] P3 next: our own terminal assistant `sw-agent chat`, with router + roles (planner/executor/fixer/chat).
 
 **Plan:**
 - **P1 Plan-as-data:** the LLM writes the whole part as one JSON plan (the existing primitives). The server validates it with pydantic and executes it deterministically with verification, with a repair loop on errors. This takes about 2–5 LLM requests per part instead of about 30, and makes weak or free models viable. It lives in sw_mcp, so all clients benefit.

@@ -3,18 +3,17 @@ waits a few seconds for the tool list), the connection is made on the first tool
 
 from __future__ import annotations
 
+from importlib import resources
+
 from mcp.server import MCPServer
 
 from . import __version__, config
 from .tools import register_all
 
-INSTRUCTIONS = """\
-Tools to build, inspect and edit parts in SolidWorks. All lengths are millimeters, angles degrees.
-World axes: X right, Y up, Z toward the viewer. Build: new_part, then make_box / make_cylinder /
-make_prism (mode add or cut), finish_edges, and check with get_model_summary.
-Edit: ask the user to click, get_selection_context, set_dimension. Save with save_document.
-Every tool answers JSON with "ok". If ok is false, read "fix" and follow it.
-"""
+
+def load_guide() -> str:
+    """The shared operating guide (src/sw_mcp/guide.md): the single source for every client."""
+    return resources.files("sw_mcp").joinpath("guide.md").read_text(encoding="utf-8")
 
 
 def _slim_schemas(mcp: MCPServer) -> None:
@@ -31,7 +30,7 @@ def _slim_schemas(mcp: MCPServer) -> None:
 
 
 def create_server() -> MCPServer:
-    instructions = INSTRUCTIONS if config.SEND_INSTRUCTIONS else None
+    instructions = load_guide() if config.SEND_INSTRUCTIONS else None
     mcp = MCPServer("solidworks", instructions=instructions, version=__version__)
     register_all(mcp)
     _slim_schemas(mcp)

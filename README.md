@@ -6,58 +6,74 @@ The tools are built for small and free models: few tools, flat arguments, units 
 argument names, and JSON answers that always carry a `fix` hint when something goes wrong.
 
 It works with any recent SolidWorks (about 2020 onward) and with localized (non-English)
-installs.
+installs. It comes with `sw-agent`, which connects free AI providers (setup wizard) and
+links the tools to OpenCode, VS Code Copilot, Gemini CLI, Claude Desktop and other MCP apps.
 
 ## Setup on the SolidWorks PC
 
-1. Install Python 3.10+ from python.org and tick "Add python.exe to PATH".
-2. Copy this folder to the PC. Then, in PowerShell inside the folder, run:
+1. Get the project: `git clone https://github.com/llamauser/solidworks-mcp-python.git`, then open
+   PowerShell in that folder and run:
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\install.ps1
    ```
-   This creates `.venv`, installs the server, writes `opencode.json` with the right Python
-   path, and runs the unit tests.
-3. Run the end-to-end check. It starts SolidWorks if needed, edits a 40×20×10 mm test block,
-   then builds a plate with fillets, holes, a pocket, a boss and an angled cut from scratch,
-   checking every step. Everything happens in a temp folder:
+   It installs Python if needed (via winget, after asking), creates `.venv`, installs everything,
+   runs the unit tests, and starts the **AI provider wizard** (below). It is safe to run again
+   after every `git pull`.
+2. Check SolidWorks works end to end. This starts SolidWorks if needed, edits a test block,
+   then builds parts from scratch (holes, pockets, repeats, a flange from one plan), checking
+   every step, all in a temp folder:
    ```powershell
    .venv\Scripts\python scripts\smoke_test.py
    ```
    Send back `smoke_test_report.txt`. To test with one of your own parts, add
    `--part "C:\path\part.SLDPRT"`. A copy is used, and you will be asked to click a face.
 
-## Using it from OpenCode
+## Connecting AI models (the wizard)
 
-The setup uses free models through **OpenRouter**. Connect it once with `opencode auth login`
-and pick OpenRouter; this needs an OpenRouter account and API key.
+`sw-agent setup` walks through AI providers one by one: OpenRouter, Google Gemini, Groq,
+Mistral, NVIDIA, Cerebras and Hugging Face, plus LM Studio and Ollama for models running on
+your own PC. For each one it:
+1. says what you get for free and **what happens to your data**. Some free tiers may train on
+   your prompts; the wizard says so clearly, and you decide.
+2. opens the page where you sign in and create a key;
+3. takes the key (hidden while you type), checks it live, and finds which models can really use
+   tools (one tiny request per model);
+4. stores the key in **Windows Credential Manager**, never in a file.
 
-Run `opencode` in this folder. It reads `opencode.json`, starts the server over stdio, and opens
-the **solidworks** agent (`.opencode/agents/solidworks.md`) by default. The agent:
-- uses `openrouter/nvidia/nemotron-3-super-120b-a12b:free`. To try another free model, change
-  the `model:` line in the agent file; free OpenRouter model IDs end in `:free`. If a model
-  answers "temporarily rate-limited upstream", its free provider is overloaded. Switch to
-  another one, e.g. `openrouter/nvidia/nemotron-3-ultra-550b-a55b:free` (the largest) or
-  `openrouter/thinkingmachines/inkling:free`.
-- can only use the SolidWorks tools. Every built-in OpenCode tool (shell, file edits, web…) is
-  denied, so the model cannot drift into writing its own COM scripts.
-- uses a short system prompt of its own instead of OpenCode's long coding prompt.
+Connect several: when one provider hits its daily limit, the assistant can use another.
+`sw-agent status` shows what is connected. The provider list is `src/sw_agent/providers.toml`;
+free offers change often, and updating that file needs no code change.
+
+## Using it from other AI apps
+
+The SolidWorks tools are a standard MCP server, so any MCP app can use them.
+`sw-agent connect` shows the steps for your apps.
+
+| App | How |
+|-----|-----|
+| **OpenCode** | Run `opencode` in this folder. The **solidworks** agent opens by default; it can only use the SolidWorks tools. Its model is set in `.opencode/agents/solidworks.md`. OpenCode's own "Free" models reject setups with tools, so use an `openrouter/...:free` model (connect OpenRouter with `opencode auth login`). |
+| **VS Code + GitHub Copilot** | Open this folder. `.vscode/mcp.json` starts the server; in Chat, pick the **SolidWorks** agent (`.github/agents/solidworks.agent.md`). |
+| **Gemini CLI** | Run `gemini` in this folder. `.gemini/settings.json` starts the server, and `GEMINI.md` holds the instructions. |
+| **Claude Desktop** | `sw-agent connect` adds the server to its config for you (a backup of the old config is kept). |
+| **Cursor, Cline, LM Studio, Windsurf, ...** | `sw-agent connect` prints the `mcpServers` snippet to paste. |
+
+All the apps get the same operating guide, `src/sw_mcp/guide.md`. Edit only that file, then
+run `sw-agent sync` to regenerate each app's copy. A test checks that the copies are current.
+Apps without their own instruction file receive the guide from the server itself
+(`SW_MCP_INSTRUCTIONS=1`).
+
+If a free model answers "temporarily rate-limited upstream", its provider is overloaded; switch
+models. To compare models, use [docs/model-test-prompts.md](docs/model-test-prompts.md).
+
+**Keeping usage low:**
+- **Plan in one request:** `build_part` builds a whole part from one plan, instead of one
+  request per feature.
+- **OpenCode:** `compaction.prune` drops old tool outputs from the history.
+- **Sessions:** start a new one for each new task, so old history isn't re-sent every turn.
 
 Ask, for example:
 
-> What is open in SolidWorks? … *(click a face)* … make this 5 mm thicker and export a STEP to C:\Temp\part.step
-
-To compare the free models, use [docs/model-test-prompts.md](docs/model-test-prompts.md).
-
-**Keeping usage low.** On OpenRouter's free models, every model turn counts as one request, and
-each tool call adds a turn. The daily request limit is small unless the account has bought
-credits; check OpenRouter's current limits. This setup is tuned to use few requests:
-- **Agent:** it calls `get_status` only at the start and after errors, stops after 12 steps,
-  and answers in one or two sentences.
-- **OpenCode config:** `compaction.prune` drops old tool outputs from the history, and
-  `small_model` sends session-title requests to a tiny free model.
-- **Server:** it sends no connect-time instructions (`SW_MCP_INSTRUCTIONS=0`), because the
-  agent file already carries the rules.
-- **Sessions:** start a new one for each new task, so old history isn't re-sent every turn.
+> Make a 100 x 60 x 12 mm base plate with rounded corners (R8) and four 8 mm holes 10 mm in from each side.
 
 ## Tools
 
