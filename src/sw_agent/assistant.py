@@ -27,6 +27,7 @@ TRANSCRIPT_CHARS = 8000
 LEAN_TOOLS = (
     "get_status", "open_document", "save_document", "build_part", "get_model_summary",
     "get_selection_context", "set_dimension", "undo_last_feature", "make_assembly", "list_project",
+    "manage_documents", "connect_parts", "move_mechanism", "make_motion_study",
 )
 MAX_STEPS = 15
 KEEP_MESSAGES = 24          # conversation messages sent with each request (plus the system prompt)

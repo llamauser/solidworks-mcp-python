@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from mcp.types import ToolAnnotations
 from pydantic import Field
@@ -51,6 +51,28 @@ def save_document(
     return docs.save_document(sw.doc, save_as_path, overwrite)
 
 
+@sw_tool(needs="app", idempotent=False, timeout=120)
+def manage_documents(
+    sw: Session,
+    action: Annotated[Literal["list", "activate", "close"], Field(description="list, activate (bring to front) or close.")],
+    name: Annotated[str, Field(description='Document name. For close: "" = the active window, "all" = every window.')] = "",
+    discard_unsaved: Annotated[bool, Field(description="Only true if the user agreed to lose unsaved changes.")] = False,
+) -> dict:
+    """List, bring to the front, or close SolidWorks windows.
+
+    Use when: too many windows are open, or a specific part/assembly should be the active one.
+    Closing never loses work unless discard_unsaved=true: unsaved documents are reported instead.
+    Examples: manage_documents(action="list")
+              manage_documents(action="activate", name="V4 engine")
+              manage_documents(action="close", name="all")
+    """
+    if action == "list":
+        return docs.list_documents(sw.app)
+    if action == "activate":
+        return docs.activate_document(sw.app, name)
+    return docs.close_documents(sw.app, name, discard_unsaved)
+
+
 def register(mcp) -> None:
     mcp.tool(
         structured_output=False,
@@ -60,3 +82,7 @@ def register(mcp) -> None:
         structured_output=False,
         annotations=ToolAnnotations(title="Save or export", destructive_hint=False, idempotent_hint=True),
     )(save_document)
+    mcp.tool(
+        structured_output=False,
+        annotations=ToolAnnotations(title="Manage windows", destructive_hint=True),
+    )(manage_documents)

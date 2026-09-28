@@ -258,7 +258,18 @@ Next batch after these: `new_part`, `create_sketch(plane)`, `sketch_rectangle`, 
     - (d) The old 05:00 OpenCode session had many bosses fail 8× with features but no passing placement (12–48 s each) → a boss with 0 faces is now reported after ONE attempt as "inside the part or zero-thickness contact". The faces count is logged per attempt.
   - 153 tests pass.
 
-**ALL PHASES (P1–P6) BUILT. NEXT: the user re-runs Tools menu option 3 and sends the zip.**
+- [x] **Windows + motion (the user asked: close documents, and motion study tools):**
+  - `manage_documents(action=list|activate|close, name, discard_unsaved)` in `sw/documents.py` (GetDocuments, Visible filter, CloseDoc, ActivateDoc3). It refuses to close unsaved documents without discard. `build_part(save_as)` closes the saved part window unless `keep_open`.
+  - `src/sw_mcp/core/typelib.py` reads enum values from SolidWorks' own swconst/swmotionstudy/sldworks .tlb (next to SLDWORKS.exe), plus `member_names()` to log the methods of unknown COM objects.
+  - `src/sw_mcp/sw/mechanism.py`:
+    - `connect_parts`: cylinder faces via comp.GetBodies3 + comp Transform2 → coaxial pairs (axis within 0.05 mm, radius within 1 mm, overlapping) → AddMate5 concentric (type 1, align closest 2, 15 args incl. byref err). Faces are selected with Select4 + SelectData Mark 1, or Extension.MultiSelect2 as fallback. It fixes the base (largest or named) and every unjoined part.
+    - `move_mechanism`: MathUtility.CreateTransform (row-vector ArrayData; `rotation_about`/`compose`), setting comp.Transform2 per step with EditRebuild3 + GraphicsRedraw2, and reports the travel of every part.
+    - `make_motion_study`: Extension.GetMotionStudyManager → CreateMotionStudy → StudyType (from typelib) → SetDuration → CreateDefinition(rotary motor constant from typelib) → best-effort property setters → CreateFeature → Calculate → Play. It logs the study/definition member names. **UNVERIFIED on real SW; expect to fix the motor properties from the log.**
+  - The fakes gained components with cylinder faces, mates, fix, transforms, MathUtility, motion study manager and document tracking. SaveAs renames the window like SW.
+  - make_assembly now re-checks a component after correcting its position (a bug found by the tests).
+  - The smoke test gained a mechanism section and closes its windows at the end. 21 tools; 163 tests pass.
+
+**NEXT: the user updates (Tools option 8), runs Tools option 3, and sends the zip. Check the mechanism and motion-study lines and the logged member names.**
 1. `git pull`, then double-click `Install SolidWorks Assistant.bat` (connect providers, create the shortcut).
 2. `.venv\Scripts\python scripts\smoke_test.py` and send the report. Phase 5 real-SW calls are unverified: InsertMoveCopyBody2, InsertCombineFeature, FeatureRevolve2 + CreateCenterLine, AddComponent5 placement.
 3. `sw-agent bench`, then the desktop shortcut (browser UI) with prompts B1–B6.

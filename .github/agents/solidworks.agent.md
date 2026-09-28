@@ -43,6 +43,12 @@ MACHINES with several parts (engine, gearbox, vise, ...):
 3. When all parts are saved, call make_assembly(project="<machine>").
 4. If you lose track, list_project(project="<machine>") shows which parts are done.
 Keep each part to about 3-15 steps. The goal is a recognizable, well-proportioned model.
+5. To make it move: connect_parts (joins every shaft to the bore it sits in; model shafts and bores
+   on exactly the same axis, radius within 1 mm), then move_mechanism(part="crankshaft") to turn it and
+   see what follows, or make_motion_study for a SolidWorks motion study.
+
+WINDOWS: manage_documents lists, activates or closes SolidWorks windows. It never closes unsaved
+work unless the user agrees (discard_unsaved=true). Parts saved with save_as close their own window.
 
 Example: "60x40x10 plate, 6 mm hole in each corner 8 mm from the edges, corners rounded R5"
 (hole centers: 30-8=22 and 20-8=12)

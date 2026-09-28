@@ -350,6 +350,32 @@ async def build_checks(client: Client, work: str) -> None:
                and o.get("size_mm") == [120.0, 90.0, 60.0],
                project="Smoke", name="Smoke assembly")
 
+    # Mechanism: a block with a bore, a crankshaft with an arm; connect, turn, motion study.
+    mblock = {"steps": [{"op": "box", "x": [-60, 60], "y": [0, 60], "z": [-30, 30]},
+                        {"op": "cylinder", "mode": "cut", "start": [-61, 30, 0], "end": [61, 30, 0], "diameter": 20}]}
+    mcrank = {"steps": [{"op": "cylinder", "start": [-70, 30, 0], "end": [70, 30, 0], "diameter": 20},
+                        {"op": "box", "x": [62, 66], "y": [30, 50], "z": [-4, 4]}]}
+    await step("mechanism: save 'block' (bore along X)", "build_part", lambda o: bool(o.get("saved_as")),
+               plan=json.dumps(mblock), save_as="SmokeMech/block")
+    await step("mechanism: save 'crank' (shaft in the bore, with an arm)", "build_part",
+               lambda o: bool(o.get("saved_as")), plan=json.dumps(mcrank), save_as="SmokeMech/crank")
+    await step("mechanism: make_assembly", "make_assembly",
+               lambda o: o.get("components") == ["block", "crank"] and not o.get("warnings"),
+               project="SmokeMech", name="SmokeMech")
+    await step("mechanism: connect_parts finds the shaft-in-bore joint", "connect_parts",
+               lambda o: len(o.get("joints", [])) == 1 and o.get("can_move") == ["crank-1"] and not o.get("warning"),
+               fixed_part="block")
+    await step("mechanism: move_mechanism turns the crank (arm swings)", "move_mechanism",
+               lambda o: any(m.get("part") == "crank-1" and m.get("travel_mm", 0) > 10 for m in o.get("moved", [])),
+               part="crank", degrees=180, steps=12)
+    await step("mechanism: make_motion_study (rotary motor, 60 rpm, 3 s)", "make_motion_study",
+               lambda o: bool(o.get("motion_study")), part="crank", rpm=60, seconds=3)
+    listed = await tool(client, "manage_documents", action="list")
+    record("manage_documents lists the open windows", "PASS" if listed.get("ok") else "FAIL", short(listed, 300))
+    closed = await tool(client, "manage_documents", action="close", name="all")
+    record("manage_documents closes saved windows, keeps unsaved ones",
+           "PASS" if closed.get("ok") and closed.get("closed") else "FAIL", short(closed, 300))
+
 
 def write_report() -> None:
     passed = sum(1 for _, s, _ in results if s == "PASS")

@@ -265,7 +265,7 @@ def _close_failed_builds(app: Any) -> None:
         try_call(app, "CloseDoc", title)
 
 
-def execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "") -> dict:
+def execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "", keep_open: bool = False) -> dict:
     """Build the plan. With doc=None a new part is created first. save_as="project/part"
     saves the finished part into the projects folder."""
     shapes = check_plan(plan)
@@ -323,6 +323,9 @@ def execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "") -> dict:
         out["check"] = "matches the plan" if exp else "no expect given"
     if save_as.strip():
         out["saved_as"] = project.save_part(doc, save_as)
+        if created and not keep_open:
+            try_call(app, "CloseDoc", try_call(doc, "GetTitle"))  # saved, so closing loses nothing
+            out["window"] = "closed (the part is saved in the project)"
         out["next"] = "Saved in the project. Build the next part, or call make_assembly when all parts are done."
     else:
         out["next"] = "Tell the user what was built. Save with save_document if they want to keep it."

@@ -171,7 +171,8 @@ def test_assistant_builds_a_part_with_one_plan(fake_solidworks):
     assert second[0]["role"] == "system" and "build_part" in second[0]["content"]
     assert {t["function"]["name"] for t in llm.requests[0]["tools"]} <= set(
         ("get_status", "open_document", "save_document", "build_part", "get_model_summary",
-         "get_selection_context", "set_dimension", "undo_last_feature", "make_assembly", "list_project"))
+         "get_selection_context", "set_dimension", "undo_last_feature", "make_assembly", "list_project",
+         "manage_documents", "connect_parts", "move_mechanism", "make_motion_study"))
 
 
 def test_assistant_rescues_a_plan_sent_as_text_and_fixes_after_error(fake_solidworks):

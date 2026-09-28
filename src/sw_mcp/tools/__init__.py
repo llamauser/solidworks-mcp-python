@@ -1,8 +1,8 @@
 """MCP tool wrappers. Each module exposes register(mcp)."""
 
-from . import context, dimensions, documents, modeling, plan, project, session
+from . import context, dimensions, documents, mechanism, modeling, plan, project, session
 
-MODULES = (session, documents, plan, project, modeling, context, dimensions)
+MODULES = (session, documents, plan, project, mechanism, modeling, context, dimensions)
 
 
 def register_all(mcp) -> None:

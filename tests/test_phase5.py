@@ -150,9 +150,19 @@ def test_parts_are_saved_into_a_project_and_assembled(app, tmp_path):
     assert pin["ok"]
 
 
-def test_assembly_reports_misplaced_components(app):
+def test_assembly_corrects_misplaced_components(app):
     parse(build_part(plan=json.dumps({"steps": [BLOCK]}), save_as="P/block"))
     app.component_offset = (5.0, 0.0, 0.0)  # this SolidWorks places components off their origin
+    out = parse(make_assembly(project="P"))
+    assert out["ok"] and "warnings" not in out  # moved back into place and checked
+    asm = app.created[-1]
+    assert abs(asm.components[0].Transform2.ArrayData[9] + 0.005) < 1e-9
+
+
+def test_assembly_warns_when_it_cannot_correct(app):
+    parse(build_part(plan=json.dumps({"steps": [BLOCK]}), save_as="P/block"))
+    app.component_offset = (5.0, 0.0, 0.0)
+    app.GetMathUtility = lambda: None  # moving components is not possible on this SolidWorks
     out = parse(make_assembly(project="P"))
     assert out["ok"] and "off its design position" in out["warnings"][0]
 

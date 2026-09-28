@@ -164,7 +164,11 @@ def make_assembly(app: Any, project: str, parts: str, name: str) -> dict:
         if want and len(got) >= 6:
             off = _offset((_m(got[0:3]), _m(got[3:6])), want)
             if max(abs(v) for v in off) > 0.05:
-                if not _move_component(app, comp, off):
+                _move_component(app, comp, off)
+                again = as_list(try_call(comp, "GetBox", False, False))  # check the correction worked
+                if len(again) >= 6:
+                    off = _offset((_m(again[0:3]), _m(again[3:6])), want)
+                if max(abs(v) for v in off) > 0.05:
                     warnings.append(f"{f.stem}: placed {max(abs(v) for v in off):.1f} mm off its design position")
 
     path = folder / f"{_clean(name) or 'Assembly'}.SLDASM"

@@ -9,6 +9,7 @@ Two knobs make the fake disagree with the server's first guesses, to prove self-
 from __future__ import annotations
 
 import math
+import os
 from typing import Any
 
 PLANE_AXIS = {"Front": 2, "Top": 1, "Right": 0}
@@ -235,7 +236,9 @@ class FakeExtension:
     def SaveAs(self, path, version, options, export_data, errors, warnings) -> bool:
         with open(path, "wb") as fh:
             fh.write(b"fake")
-        self.doc.path = path
+        if path.lower().endswith(".sldprt"):  # like SOLIDWORKS: the window takes the file's name
+            self.doc.path = path
+            self.doc.title = os.path.basename(path)
         errors.value = 0
         warnings.value = 0
         return True
@@ -293,6 +296,13 @@ class FakeFeatureManager:
         feat = FakeFeature(doc, f"{'Cut' if cut else 'Boss'}-Extrude{doc.feature_count}", "ICE" if not cut else "Cut")
         feat.faces = [] if (doc.broken_bosses and not cut) else [FakeBoxFace(lo, hi)]
         feat.box = (lo, hi)
+        if sketch.circles:
+            center = [0.0] * 3
+            center[ia], center[ib] = a, b
+            axis_vec = [0.0] * 3
+            axis_vec[n] = 1.0
+            doc.cylinders.append({"center": center, "axis": axis_vec, "radius": r * 1000, "s": s, "e": e,
+                                  "feature": feat})
         length = e - s
         if cut:
             # Like SolidWorks, a cut only removes material that is there: clip its length along
@@ -449,6 +459,11 @@ class FakeFeatureManager:
 
 
 class FakePart:
+    Visible = True
+
+    def GetSaveFlag(self) -> bool:
+        return not self.path  # built parts are unsaved until SaveAs gives them a path
+
     def __init__(self, title: str = "Part1") -> None:
         self.title = title
         self.features: list[FakeFeature] = [FakeFeature(self, "Origin", "OriginProfileFeature")]
@@ -468,6 +483,7 @@ class FakePart:
         self.mirror_second_axis = False
         self.rotation_sign = 1.0  # -1 makes the fake rotate the other way than the server expects
         self.broken_bosses = False  # True: bosses come out with no faces (zero-thickness contact)
+        self.cylinders: list = []  # {"center", "axis", "radius", "s", "e"} in mm, for assembly joints
         self.extra_bodies: list = []
         self.body_count = 1
         self.path = ""
@@ -524,20 +540,148 @@ class FakePart:
         return (main + tuple(self.extra_bodies)) or None
 
 
+def _xf_apply(data, p):
+    r, t = data[0:9], data[9:12]
+    return [p[0] * r[0 + k] + p[1] * r[3 + k] + p[2] * r[6 + k] + t[k] * 1000 for k in range(3)]
+
+
+class FakeTransform:
+    def __init__(self, data) -> None:
+        self.ArrayData = tuple(float(v) for v in data)
+
+
+class FakeMathUtility:
+    def CreateTransform(self, data):
+        return FakeTransform(getattr(data, "value", data))
+
+
+class FakeCylSurface:
+    def __init__(self, cyl) -> None:
+        self.CylinderParams = (*[v / 1000 for v in cyl["center"]], *cyl["axis"], cyl["radius"] / 1000)
+
+    def IsCylinder(self) -> bool:
+        return True
+
+
+class FakeCylFace:
+    def __init__(self, comp: "FakeComponent2", cyl) -> None:
+        self.comp = comp
+        self.cyl = cyl
+
+    def GetSurface(self):
+        return FakeCylSurface(self.cyl)
+
+    def GetBox(self):
+        n = self.cyl["axis"].index(1.0)
+        lo = [c - self.cyl["radius"] for c in self.cyl["center"]]
+        hi = [c + self.cyl["radius"] for c in self.cyl["center"]]
+        lo[n], hi[n] = self.cyl["s"], self.cyl["e"]
+        return (*[v / 1000 for v in lo], *[v / 1000 for v in hi])
+
+    def Select4(self, append, data) -> bool:
+        asm = self.comp.asm
+        if not append:
+            asm.selected = []
+        asm.selected.append(self)
+        return True
+
+
+class FakeCompBody:
+    def __init__(self, comp: "FakeComponent2") -> None:
+        self.comp = comp
+
+    def GetFaces(self):
+        return tuple(FakeCylFace(self.comp, c) for c in self.comp.part.cylinders)
+
+
 class FakeComponent2:
-    def __init__(self, part: FakePart, offset) -> None:
+    def __init__(self, part: FakePart, offset, asm=None) -> None:
         self.part = part
+        self.asm = asm
         self.Name2 = f"{part.title.rsplit('.', 1)[0]}-1"
         self.offset = offset
+        self._xf = FakeTransform([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0])
+        self.fixed = False
+
+    @property
+    def Transform2(self):
+        return self._xf
+
+    @Transform2.setter
+    def Transform2(self, value):
+        self._xf = value
 
     def GetBox(self, include_hidden, include_refs):
         lo, hi = self.part.union_box()
-        return (*[(lo[i] + self.offset[i]) / 1000 for i in range(3)], *[(hi[i] + self.offset[i]) / 1000 for i in range(3)])
+        corners = [[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+        pts = [_xf_apply(self._xf.ArrayData, c) for c in corners]
+        blo, bhi = _bbox(pts)
+        return (*[(blo[i] + self.offset[i]) / 1000 for i in range(3)], *[(bhi[i] + self.offset[i]) / 1000 for i in range(3)])
+
+    def GetBodies3(self, kind, info):
+        return (FakeCompBody(self),)
+
+    def Select4(self, append, data, popup) -> bool:
+        if not append:
+            self.asm.selected = []
+        self.asm.selected.append(self)
+        return True
+
+
+class FakeSelectData:
+    Mark = 0
+
+
+class FakeAsmSelectionMgr:
+    def CreateSelectData(self):
+        return FakeSelectData()
+
+
+class FakeMotionStudy:
+    def __init__(self, accept_motor: bool) -> None:
+        self.Name = "Motion Study 2"
+        self.StudyType = 0
+        self.duration = None
+        self.accept_motor = accept_motor
+        self.played = False
+
+    def Activate(self):
+        return True
+
+    def SetDuration(self, seconds):
+        self.duration = seconds
+        return True
+
+    def CreateDefinition(self, kind):
+        return type("MotorData", (), {"MotorType": 0})()
+
+    def CreateFeature(self, definition):
+        return object() if self.accept_motor else None
+
+    def Calculate(self):
+        return True
+
+    def Play(self):
+        self.played = True
+        return True
+
+
+class FakeMotionStudyManager:
+    def __init__(self, accept_motor: bool) -> None:
+        self.study = FakeMotionStudy(accept_motor)
+
+    def CreateMotionStudy(self):
+        return self.study
 
 
 class FakeAssemblyExtension:
     def __init__(self, asm: "FakeAssembly") -> None:
         self.asm = asm
+
+    def GetMotionStudyManager(self):
+        if self.asm.motion is None:
+            return None
+        return self.asm.motion
 
     def SaveAs(self, path, version, options, export_data, errors, warnings) -> bool:
         with open(path, "wb") as fh:
@@ -549,12 +693,21 @@ class FakeAssemblyExtension:
 
 
 class FakeAssembly:
+    Visible = True
+
+    def GetSaveFlag(self) -> bool:
+        return not self.path
+
     def __init__(self, app, title: str) -> None:
         self.app = app
         self.title = title
         self.path = ""
         self.components: list[FakeComponent2] = []
         self.Extension = FakeAssemblyExtension(self)
+        self.SelectionManager = FakeAsmSelectionMgr()
+        self.selected: list = []
+        self.mates: list = []
+        self.motion = FakeMotionStudyManager(accept_motor=True)
 
     def GetTitle(self) -> str:
         return self.title
@@ -569,9 +722,39 @@ class FakeAssembly:
         part = self.app.GetOpenDocumentByName(path)
         if part is None:
             return None
-        comp = FakeComponent2(part, self.app.component_offset)
+        comp = FakeComponent2(part, self.app.component_offset, self)
         self.components.append(comp)
         return comp
+
+    def GetComponents(self, top_level):
+        return tuple(self.components)
+
+    def ClearSelection2(self, all_):
+        self.selected = []
+
+    def AddMate5(self, kind, align, flip, *rest):
+        faces = [s for s in self.selected if isinstance(s, FakeCylFace)]
+        err = rest[-1]
+        if len(faces) != 2:
+            err.value = 1
+            return None
+        err.value = 0
+        self.mates.append((kind, faces[0].comp.Name2, faces[1].comp.Name2))
+        return object()
+
+    def FixComponent(self):
+        for c in self.selected:
+            c.fixed = True
+
+    def UnfixComponent(self):
+        for c in self.selected:
+            c.fixed = False
+
+    def EditRebuild3(self):
+        return True
+
+    def GraphicsRedraw2(self):
+        return None
 
     def GetBox(self, options):
         boxes = [c.GetBox(False, False) for c in self.components]
@@ -611,9 +794,20 @@ def make_modeling_app():
                 return doc
         return None
 
+    app.GetMathUtility = lambda: FakeMathUtility()
     app.GetUserPreferenceStringValue = lambda index: (r"C:\templates\assembly.asmdot" if index == 9
                                                       else r"C:\templates\part.prtdot")
     app.NewDocument = new_document
     app.GetOpenDocumentByName = open_by_name
     app.CloseDoc = lambda title: app.closed.append(title)
+    app.GetDocuments = lambda: tuple(d for d in app.created if d.GetTitle() not in app.closed)
+
+    def activate(title, use_prefs, option, errors):
+        for d in app.created:
+            if d.GetTitle() == title:
+                app.ActiveDoc = d
+        errors.value = 0
+        return app.ActiveDoc
+
+    app.ActivateDoc3 = activate
     return app

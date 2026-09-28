@@ -15,6 +15,7 @@ def build_part(
     plan: Annotated[str, Field(description='JSON: {"steps": [...], "expect": {"size": [x, y, z]}}')],
     start_new_part: Annotated[bool, Field(description="false = add the steps to the part that is open now.")] = True,
     save_as: Annotated[str, Field(description='"project/part" to save it for an assembly, e.g. "V4 engine/piston".')] = "",
+    keep_open: Annotated[bool, Field(description="With save_as: keep the part window open (default closes it).")] = False,
 ) -> dict:
     """Build a whole part from one JSON plan. Fewest requests; use it for anything new.
 
@@ -34,7 +35,7 @@ def build_part(
     {"op":"repeat","copies":1,"step":[44,0,0]},{"op":"repeat","copies":1,"step":[0,0,24]}],"expect":{"size":[60,10,40]}}
     On error: fix the step it names and send the whole plan again.
     """
-    return p.execute(sw.app, None if start_new_part else sw.doc, p.parse_plan(plan), save_as)
+    return p.execute(sw.app, None if start_new_part else sw.doc, p.parse_plan(plan), save_as, keep_open)
 
 
 def register(mcp) -> None:

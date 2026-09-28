@@ -188,3 +188,91 @@ def save_document(doc: Any, save_as_path: str, overwrite: bool) -> dict:
     if kind == "exported":
         result["note"] = "Exported a copy. The open SolidWorks document itself was not renamed."
     return result
+
+
+# ---------------------------------------------------------------- managing open windows
+def open_documents(app: Any) -> list[Any]:
+    docs = [d for d in (try_call(app, "GetDocuments") or ()) if d is not None]
+    if docs:
+        return docs
+    out, doc, n = [], try_call(app, "GetFirstDocument"), 0  # older API
+    while doc is not None and n < 500:
+        out.append(doc)
+        doc, n = try_call(doc, "GetNext"), n + 1
+    return out
+
+
+def _visible(doc: Any) -> bool:
+    # Parts loaded only because an open assembly uses them have no window of their own.
+    return try_call(doc, "Visible") is not False
+
+
+def list_documents(app: Any) -> dict:
+    active = try_call(try_call(app, "ActiveDoc"), "GetTitle")
+    docs = []
+    for doc in open_documents(app):
+        if not _visible(doc):
+            continue
+        info = doc_summary(doc)
+        info["active"] = info["name"] == active
+        docs.append(info)
+    unsaved = [d["name"] for d in docs if d.get("unsaved_changes") or not d["path"]]
+    out: dict[str, Any] = {"open": len(docs), "documents": docs[:40]}
+    if unsaved:
+        out["unsaved"] = unsaved
+    return out
+
+
+def find_document(app: Any, name: str) -> Any:
+    wanted = name.strip().strip('"').lower()
+    stem = os.path.splitext(os.path.basename(wanted))[0]
+    for doc in open_documents(app):
+        title = str(try_call(doc, "GetTitle") or "").lower()
+        path = str(try_call(doc, "GetPathName") or "").lower()
+        if wanted in (title, path) or stem == os.path.splitext(title)[0] or (path and stem == os.path.splitext(os.path.basename(path))[0]):
+            return doc
+    raise SwError(Code.NOT_FOUND, f"No open document called '{name}'.",
+                  "Use manage_documents(action=\"list\") to see the open documents.")
+
+
+def activate_document(app: Any, name: str) -> dict:
+    doc = find_document(app, name)
+    title = try_call(doc, "GetTitle")
+    try:
+        call_with_out_ints(app, "ActivateDoc3", title, False, 0, n_out=1)
+    except Exception:  # noqa: BLE001 - older API
+        call(app, "ActivateDoc", title)
+    return {"active": doc_summary(try_call(app, "ActiveDoc") or doc)}
+
+
+def _is_unsaved(doc: Any) -> bool:
+    return bool(try_call(doc, "GetSaveFlag")) or not try_call(doc, "GetPathName")
+
+
+def close_documents(app: Any, name: str, discard_unsaved: bool) -> dict:
+    """name: "" = the active window, "all" = every window, otherwise a document name."""
+    key = name.strip().lower()
+    if key == "all":
+        targets = [d for d in open_documents(app) if _visible(d)]
+    elif key in ("", "active"):
+        active = try_call(app, "ActiveDoc")
+        if active is None:
+            raise SwError(Code.NO_ACTIVE_DOC, "No document is open.", "Nothing to close.")
+        targets = [active]
+    else:
+        targets = [find_document(app, name)]
+    closed, kept = [], []
+    for doc in targets:
+        title = try_call(doc, "GetTitle")
+        if _is_unsaved(doc) and not discard_unsaved:
+            kept.append(title)
+            continue
+        call(app, "CloseDoc", title)
+        closed.append(title)
+    out: dict[str, Any] = {"closed": closed}
+    if kept:
+        out["kept_unsaved"] = kept
+        out["note"] = ("These have unsaved changes and were NOT closed. Ask the user: save them with "
+                       "save_document, or close them with discard_unsaved=true (their changes are lost).")
+    out["still_open"] = sum(1 for d in open_documents(app) if _visible(d))
+    return out
