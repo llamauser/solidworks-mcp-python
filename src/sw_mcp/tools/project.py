@@ -5,8 +5,11 @@ from typing import Annotated
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from ..core.errors import Code, SwError
 from ..core.resilience import Session, sw_tool
+from ..sw import design
 from ..sw import project as pr
+
 
 
 @sw_tool(needs="app", timeout=600)
@@ -39,6 +42,35 @@ def list_project(
     return pr.list_project(project)
 
 
+@sw_tool(needs=None)
+def plan_machine(
+    sw: Session,
+    project: Annotated[str, Field(description="A NEW project name for this machine, e.g. \"CVT 1\".")],
+    goal: Annotated[str, Field(description="One or two sentences: what the machine is and does.")],
+    parts: Annotated[str, Field(description='One part per line: "name: what it is, main sizes, where it sits".')],
+    notes: Annotated[str, Field(description="Shared numbers every part must use: axes, spacing, clearances.")] = "",
+) -> dict:
+    """Write the plan of a machine with several parts: the checklist every AI model follows.
+
+    Use when: starting a machine (anything with 2 or more parts). Call it FIRST, then build each part
+    with build_part(save_as="<project>/<name>"). Put shared numbers in notes (e.g. "input shaft axis:
+    Y through x=0,z=0; output shaft: Y through x=250,z=0; bores d30.5 for d30 shafts").
+    Calling it again replaces the plan but keeps parts that are already built.
+    Example: plan_machine(project="CVT 1", goal="Belt CVT, shafts 250 mm apart",
+             parts="input_shaft: d30 x 200 along Y at x=0\nprimary_pulley: two cones d150 on input_shaft",
+             notes="input axis Y at x=0,z=0; output axis Y at x=250,z=0")
+    """
+    items = design.parse_parts(parts)
+    if not items:
+        raise SwError(Code.BAD_ARGUMENT, "The plan has no parts.",
+                      'Give one part per line, like "input_shaft: d30 x 200 along Y at x=0".')
+    pr.split_name(f"{project}/x")  # a usable project name
+    design.set_plan(project, goal, items, notes)
+    return {"project": project, "parts": [p["name"] for p in items], "design": design.summary(project),
+            "next": f'Build the first part with build_part(save_as="{project}/{items[0]["name"]}").'}
+
+
 def register(mcp) -> None:
+    mcp.tool(structured_output=False, annotations=ToolAnnotations(title="Plan a machine"))(plan_machine)
     mcp.tool(structured_output=False, annotations=ToolAnnotations(title="Make assembly"))(make_assembly)
     mcp.tool(structured_output=False, annotations=ToolAnnotations(read_only_hint=True))(list_project)

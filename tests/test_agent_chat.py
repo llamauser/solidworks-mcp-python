@@ -242,7 +242,7 @@ def test_assistant_builds_a_part_with_one_plan(fake_solidworks):
     assert {t["function"]["name"] for t in llm.requests[0]["tools"]} <= set(
         ("get_status", "open_document", "save_document", "build_part", "get_model_summary",
          "get_selection_context", "set_dimension", "make_assembly", "list_project",
-         "manage_documents", "make_engine", "connect_parts", "move_mechanism", "make_motion_study"))
+         "manage_documents", "make_engine", "connect_parts", "move_mechanism", "make_motion_study", "plan_machine"))
 
 
 def test_assistant_rescues_a_plan_sent_as_text_and_fixes_after_error(fake_solidworks):
@@ -345,7 +345,7 @@ def test_tool_definitions_are_compact(fake_solidworks):
             return toolbox.tools
 
     tools = run(go())
-    assert len(json.dumps(tools)) < 9500
+    assert len(json.dumps(tools)) < 10500
     build = next(t for t in tools if t["function"]["name"] == "build_part")["function"]["description"]
     assert '"op":"cylinder"' in build and "Example" not in build
 

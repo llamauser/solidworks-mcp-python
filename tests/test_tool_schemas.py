@@ -33,7 +33,7 @@ def test_all_tools_present(tools):
         "get_status", "open_document", "get_selection_context", "set_dimension", "save_document",
         "new_part", "make_box", "make_cylinder", "make_prism", "finish_edges", "undo_last_feature",
         "repeat_last_shape", "repeat_last_shape_around", "build_part", "make_assembly", "list_project",
-        "manage_documents", "connect_parts", "move_mechanism", "make_motion_study", "make_engine",
+        "manage_documents", "connect_parts", "move_mechanism", "make_motion_study", "make_engine", "plan_machine",
         "get_model_summary",
     }
 

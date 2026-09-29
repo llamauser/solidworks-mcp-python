@@ -270,7 +270,32 @@ def _close_failed_builds(app: Any) -> None:
 
 def execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "", keep_open: bool = False) -> dict:
     """Build the plan. With doc=None a new part is created first. save_as="project/part"
-    saves the finished part into the projects folder."""
+    saves the finished part into the projects folder and records it in the project's shared
+    design (design.json), success or failure."""
+    target = project.split_name(save_as) if save_as.strip() else None
+    try:
+        out = _execute(app, doc, plan, save_as, keep_open)
+    except SwError as err:
+        if target:
+            _record(target, plan, error=err.message)
+        raise
+    if target:
+        _record(target, plan, result=out)
+    return out
+
+
+def _record(target: tuple[str, str], plan: Plan, result: dict | None = None, error: str = "") -> None:
+    from . import design
+
+    try:
+        design.record_part(target[0], target[1], plan.model_dump(mode="json", exclude_none=True), result, error)
+    except Exception:  # noqa: BLE001 - the design record must never break a build
+        import logging
+
+        logging.getLogger(__name__).warning("could not record %s in design.json", target, exc_info=True)
+
+
+def _execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "", keep_open: bool = False) -> dict:
     shapes = check_plan(plan)
     if save_as.strip():
         project.split_name(save_as)  # reject a bad name before building anything

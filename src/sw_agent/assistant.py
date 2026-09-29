@@ -28,9 +28,10 @@ TRANSCRIPT_CHARS = 8000
 
 LEAN_TOOLS = (
     "get_status", "open_document", "save_document", "build_part", "get_model_summary",
-    "get_selection_context", "set_dimension", "make_assembly", "list_project",
+    "get_selection_context", "set_dimension", "plan_machine", "make_assembly", "list_project",
     "manage_documents", "make_engine", "connect_parts", "move_mechanism", "make_motion_study",
 )
+PROJECT_TOOLS = ("plan_machine", "make_assembly", "list_project", "make_engine")
 MAX_STEPS = 24
 OLD_TURNS = 6               # earlier requests kept (as short notes) in each request
 FULL_EXCHANGES = 2          # the newest tool calls/results of the current request are sent in full
@@ -301,11 +302,13 @@ class Assistant:
         self.history: list[dict] = []
         self.approver = approver
         self.review = review if review in REVIEW_TOOLS else "off"
+        self.active_project: str | None = None  # its design summary goes into every request
         self._stop = False
         router.on_event = lambda msg: self.on_event(Event("model", msg))
 
     def reset(self) -> None:
         self.history.clear()
+        self.active_project = None
         if self.transcript is not None:
             self.transcript.write("info", "new conversation")
 
@@ -334,6 +337,36 @@ class Assistant:
             return await asyncio.to_thread(self._run_extra, name, args, cand)
         return await self.toolbox.call(name, args)
 
+    # ---------------------------------------------------------------- the shared design picture
+    def note_project(self, name: str, args: dict) -> None:
+        """Follow which project the job works on, from the tool calls."""
+        project = None
+        save_as = str(args.get("save_as") or "")
+        if "/" in save_as.replace("\\", "/"):
+            project = save_as.replace("\\", "/").split("/")[0].strip()
+        elif name in PROJECT_TOOLS and str(args.get("project") or "").strip():
+            project = str(args["project"]).strip()
+        elif name == "open_document":
+            try:
+                from sw_mcp.sw import design
+
+                project = design.project_of_path(str(args.get("file_path") or ""))
+            except Exception:  # noqa: BLE001
+                project = None
+        if project:
+            self.active_project = project
+
+    def design_block(self) -> str:
+        if not self.active_project:
+            return ""
+        try:
+            from sw_mcp.sw import design
+
+            return design.summary(self.active_project)
+        except Exception:  # noqa: BLE001 - a broken record must not stop the conversation
+            log.warning("could not read the design of %s", self.active_project, exc_info=True)
+            return ""
+
     def request_stop(self) -> None:
         """Stop after the step that is running now (a SolidWorks operation is never cut off halfway)."""
         self._stop = True
@@ -351,13 +384,15 @@ class Assistant:
             "tool_definitions_chars": len(json.dumps(tools)),
             "messages": window,
             "review": self.review,
+            "project": self.active_project or "",
         }
 
     def _window(self) -> list[dict]:
         """System prompt + a compact history. Earlier requests become (user text, a short note of
         what the tools did, the reply); the current request is sent in full, except that tool
         results and long arguments older than the newest FULL_EXCHANGES exchanges are shortened."""
-        out = [{"role": "system", "content": self.system}]
+        block = self.design_block()
+        out = [{"role": "system", "content": self.system + ("\n\n" + block if block else "")}]
         users = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
         if not users:
             return out
@@ -458,6 +493,7 @@ class Assistant:
                         self.on_event(Event("info", "Running your edited version."))
                 if self.transcript is not None:
                     self.transcript.write("tool_call", name, arguments=json.dumps(args)[:TRANSCRIPT_CHARS])
+                self.note_project(name, args)
                 self.on_event(Event("tool", name, {"args": args}))
                 key = name + json.dumps(args, sort_keys=True)
                 target = str(args.get("save_as") or args.get("project") or args.get("part") or "")

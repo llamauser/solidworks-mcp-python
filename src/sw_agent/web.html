@@ -456,6 +456,7 @@ async function showContext() {
   $("contextBody").innerHTML = `
     <div class="why">About ${data.estimated_tokens} tokens per request (tool definitions ${data.tool_definitions_chars} characters)
       ${data.model ? "&middot; last model: " + esc(data.model) : ""}. Older steps are shortened to save your free quota.</div>
+    ${data.project ? `<div class="why">Project: <b>${esc(data.project)}</b>. Its shared design (checklist, parts, joints) is at the end of the instructions, so every model sees the same picture.</div>` : ""}
     <details><summary>Instructions (system prompt)</summary>${system ? `<pre>${esc(system.content)}</pre>` : ""}</details>
     <details><summary>Tools offered (${(data.tools || []).length})</summary><pre>${esc((data.tools || []).join(", "))}</pre></details>
     <h4 style="margin:10px 0 4px">Conversation as the AI sees it (${rest.length} messages)</h4>

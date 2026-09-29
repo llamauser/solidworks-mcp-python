@@ -274,6 +274,14 @@ def build(app: Any, project: str, eng: EngineDesign) -> dict:
 
     pr.split_name(f"{project}/block")  # reject a bad project name before building anything
     folder = pr.part_path(f"{project}/block").parent
+    from . import design
+
+    what = {"block": "crankcase with the cylinder barrels and bores", "crankshaft": "journals, webs, crank pins, flywheel",
+            "head": "cylinder head", "head_a": "cylinder head, bank A", "head_b": "cylinder head, bank B"}
+    design.set_plan(project, f"{eng.layout} {len(eng.cylinders)}-cylinder engine, bore {eng.bore:g} x stroke "
+                             f"{eng.stroke:g} mm (built by make_engine)",
+                    [{"name": n, "description": what.get(n, f"{n[:-1]} for cylinder {n[-1]}" if n[-1].isdigit() else n)}
+                     for n in eng.parts])
     record = folder / ".engine_parts.json"  # plan fingerprints of parts already built
     try:
         done_before = json.loads(record.read_text(encoding="utf-8"))
@@ -286,6 +294,7 @@ def build(app: Any, project: str, eng: EngineDesign) -> dict:
         if done_before.get(name, {}).get("plan") == fingerprint and (folder / f"{name}.SLDPRT").exists():
             built[name] = done_before[name].get("size_mm")
             reused.append(name)
+            design.record_part(project, name, steps, {"size_mm": built[name]})
             continue
         try:
             out = p.execute(app, None, p.Plan.model_validate(steps), save_as=f"{project}/{name}")

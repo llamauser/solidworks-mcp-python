@@ -295,12 +295,30 @@ def connect_parts(doc: Any, fixed_part: str = "") -> dict:
     if moved:
         out["warning"] = (f"These parts moved while connecting: {', '.join(moved)}. A shaft and bore were "
                           "probably not exactly coaxial; check those parts.")
+    _design_joints(asm, made, fixed, moving)
     if not made:
         out["hint"] = ("No shaft-in-bore pairs were found. Parts connect when a cylinder of one part sits "
                        "exactly in a hole or cylinder of another (same axis, radius within 1 mm).")
     else:
         out["next"] = "Turn a moving part with move_mechanism, or make_motion_study for a SolidWorks motion study."
     return out
+
+
+def _design_project(asm: Any) -> str | None:
+    from . import design
+
+    return design.project_of_path(str(try_call(asm, "GetPathName") or ""))
+
+
+def _design_joints(asm: Any, made: list[str], fixed: list[str], moving: list[str]) -> None:
+    try:
+        from . import design
+
+        project = _design_project(asm)
+        if project:
+            design.record_joints(project, made, fixed, moving)
+    except Exception:  # noqa: BLE001 - the record must never break the tool
+        log.warning("could not record the joints", exc_info=True)
 
 
 # ---------------------------------------------------------------- turning a part
@@ -361,6 +379,15 @@ def move_mechanism(app: Any, doc: Any, part: str, degrees: float, steps: int) ->
     still = [n for n, t in farthest.items() if t <= 0.1]
     out: dict[str, Any] = {"turned": comp_name(comp), "degrees": degrees, "steps": steps,
                            "moved": moved, "did_not_move": still}
+    try:
+        from . import design
+
+        project = _design_project(asm)
+        if project:
+            design.record_event(project, f"turned {comp_name(comp)} {degrees:g} deg: " + (
+                ", ".join(f"{mv['part']} {mv['travel_mm']} mm" for mv in moved[:8]) or "nothing else moved"))
+    except Exception:  # noqa: BLE001
+        log.warning("could not record the motion", exc_info=True)
     if exact:
         out["motion"] = "exact engine motion (slider-crank): travel_mm of a piston is its stroke"
     else:

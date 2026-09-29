@@ -81,12 +81,17 @@ def list_project(project: str) -> dict:
                       "Call list_project with an empty name to see the projects.")
     files = [f for f in sorted(folder.glob("*.SLDPRT")) + sorted(folder.glob("*.SLDASM"))
              if not f.name.startswith("~$")]  # SolidWorks' lock files for open documents
-    return {
+    out = {
         "project": folder.name,
         "folder": str(folder),
         "parts": [f.stem for f in files if f.suffix.upper() == ".SLDPRT"],
         "assemblies": [f.stem for f in files if f.suffix.upper() == ".SLDASM"],
     }
+    from . import design
+
+    if design.exists(folder.name):
+        out["design"] = design.summary(folder.name)
+    return out
 
 
 def _open(app: Any, path: str) -> tuple[Any, bool]:
@@ -199,5 +204,11 @@ def make_assembly(app: Any, project: str, parts: str, name: str) -> dict:
         out["size_mm"] = [round(hi[i] - lo[i], 2) for i in range(3)]
     if warnings:
         out["warnings"] = warnings
+    try:
+        from . import design
+
+        design.record_assembly(folder.name, path.name, placed, out.get("size_mm"), warnings)
+    except Exception:  # noqa: BLE001 - never break the assembly for the record
+        pass
     out["next"] = "Tell the user the assembly is ready and where it was saved."
     return out

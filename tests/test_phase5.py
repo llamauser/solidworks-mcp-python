@@ -169,7 +169,7 @@ def test_part_in_separate_pieces_is_refused_and_not_saved(app):
         {"op": "cylinder", "start": [0, 30, 0], "end": [0, 40, 0], "diameter": 5}]}), save_as="Kit/floating"))
     assert out["error"] == Code.CHECK_FAILED and "2 separate pieces" in out["message"]
     assert "step 2 (cylinder add) does not touch" in out["message"] and "not saved" in out["message"]
-    assert "floating" not in json.dumps(parse(list_project(project="Kit"))) if (pr.projects_root() / "Kit").exists() else True
+    assert "floating" not in parse(list_project(project="Kit"))["parts"]  # not saved (only recorded as failed)
     ok = parse(build_part(plan=json.dumps({"steps": [
         {"op": "box", "x": [-20, 20], "y": [0, 10], "z": [-20, 20]},
         {"op": "cylinder", "start": [0, 30, 0], "end": [0, 40, 0], "diameter": 5}], "expect": {"bodies": 2}})))

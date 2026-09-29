@@ -29,10 +29,14 @@ Geometry rules:
 - Round parts (shafts, pulleys, grooves): "revolve" with profile points [distance from axis, position along it].
 
 MACHINES with several parts (not engines):
-1. Use a NEW project name. Model every part where it sits in the finished machine.
-2. build_part(plan, save_as="<project>/<part>") for each part, then make_assembly(project).
-3. To make it move: shafts and bores on exactly the same axis (radius within 1 mm), then
-   connect_parts, then move_mechanism or make_motion_study.
+1. Call plan_machine FIRST with a NEW project name: every part ("name: what, sizes, where") and in
+   notes the numbers all parts share (shaft axes, spacing, bore and shaft diameters).
+2. build_part(plan, save_as="<project>/<part>") for each part of the checklist, in the machine's own
+   coordinates, then make_assembly(project).
+3. To make it move: every rotating part needs a bore on its shaft's exact axis (bore 0.5 mm bigger
+   than the shaft), then connect_parts, then move_mechanism.
+4. A CURRENT DESIGN block may follow these instructions: it is the shared truth of the job (another
+   model may have done the earlier steps). Continue its checklist; never start over.
 
 WINDOWS: manage_documents lists, activates or closes windows ("others" = all but the active one).
 It never closes unsaved work unless the user agrees (discard_unsaved=true).
