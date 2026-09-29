@@ -75,7 +75,22 @@ def manage_documents(
     return docs.close_documents(sw.app, name, discard_unsaved)
 
 
+@sw_tool(needs="doc", idempotent=True, timeout=120)
+def save_picture(
+    sw: Session,
+    file_path: Annotated[str, Field(description=r"Where to save the image, e.g. C:\Temp\result.png")],
+) -> dict:
+    """Save a picture of the active part or assembly (isometric, zoomed to fit).
+
+    Use when: a picture of the result is wanted (the assistant records one after each build).
+    Example: save_picture(file_path="C:\\Temp\\result.png")
+    """
+    return docs.save_picture(sw.doc, file_path)
+
+
 def register(mcp) -> None:
+    mcp.tool(structured_output=False, annotations=ToolAnnotations(title="Save picture", read_only_hint=True))(
+        save_picture)
     mcp.tool(
         structured_output=False,
         annotations=ToolAnnotations(title="Open document", read_only_hint=False, idempotent_hint=True),

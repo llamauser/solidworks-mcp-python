@@ -163,3 +163,19 @@ def test_pick_any_model_and_switch_openai_extras(client, monkeypatch):
     saved = UserConfig.load()
     assert saved.manual["model"] == "gpt-5.6-terra" and saved.openai_tools == {"internet": True, "terminal": False}
     assert client.get("/api/providers", headers=H).json()["openai_tools"]["internet"] is True
+
+
+def test_rate_the_build_and_pack_the_records(client, tmp_path, monkeypatch):
+    from sw_agent import jobs
+
+    monkeypatch.setattr(jobs, "pack", lambda dest=None: (tmp_path / "builds.zip", 1))
+    client.post("/api/send", json={"text": "plate"}, headers=H)
+    events = events_until_idle(client)
+    job = next(e for e in events if e["kind"] == "job")
+    assert job["data"]["changed"] is True
+    r = client.post("/api/rate", json={"id": job["data"]["id"], "stars": 5, "tags": ["other"], "comment": "great"},
+                    headers=H)
+    assert r.json()["rating"]["stars"] == 5 and jobs.load(job["data"]["id"])["rating"]["comment"] == "great"
+    assert client.post("/api/rate", json={"id": "nope", "stars": 5}, headers=H).status_code == 400
+    shared = client.post("/api/share?open=0", json={}, headers=H).json()
+    assert shared["ok"] and shared["jobs"] == 1

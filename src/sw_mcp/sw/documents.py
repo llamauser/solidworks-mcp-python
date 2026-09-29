@@ -308,3 +308,30 @@ def release_file(app: Any, path: str, saving: Any = None) -> list[str]:
         call(app, "CloseDoc", title)
         closed.append(title)
     return closed
+
+
+# ---------------------------------------------------------------- a picture of the result
+def save_picture(doc: Any, path: str) -> dict:
+    """An image of the active document (zoomed to fit), for the job record. Tries PNG, then JPEG
+    (SolidWorks exports both), then the old SaveBMP."""
+    base = os.path.splitext(clean_path(path))[0]
+    os.makedirs(os.path.dirname(base), exist_ok=True)
+    try_call(doc, "ShowNamedView2", "*Isometric", 7)
+    try_call(doc, "ViewZoomtofit2")
+    tried = []
+    for ext in (".png", ".jpg", ".bmp"):
+        target = base + ext
+        try:
+            if ext == ".bmp":
+                ok = bool(call(doc, "SaveBMP", target, 800, 600))
+            else:
+                ok, err, _ = _save_as(doc, target)
+                ok = ok and not err
+        except Exception as exc:  # noqa: BLE001 - try the next format
+            tried.append(f"{ext}: {exc}")
+            continue
+        if ok and os.path.isfile(target) and os.path.getsize(target) > 0:
+            return {"picture": target, "size_kb": round(os.path.getsize(target) / 1024, 1)}
+        tried.append(f"{ext}: not written")
+    raise SwError(Code.SAVE_FAILED, "SolidWorks could not save a picture: " + "; ".join(tried)[:300],
+                  "Nothing to do; the picture is optional.")

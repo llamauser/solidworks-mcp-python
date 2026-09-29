@@ -772,8 +772,9 @@ class FakeAssemblyExtension:
     def SaveAs(self, path, version, options, export_data, errors, warnings) -> bool:
         with open(path, "wb") as fh:
             fh.write(b"fake assembly")
-        self.asm.path = path
-        self.asm.title = os.path.basename(path)  # like SOLIDWORKS: the window takes the file's name
+        if path.lower().endswith(".sldasm"):  # like SOLIDWORKS: the window takes the file's name
+            self.asm.path = path
+            self.asm.title = os.path.basename(path)
         errors.value = 0
         warnings.value = 0
         return True

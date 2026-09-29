@@ -50,6 +50,21 @@ def _hand_over_logs(console: Console, open_explorer: bool = True) -> None:
     console.print(f"[dim]Raw logs folder: {log_dir()}[/dim]")
 
 
+def cmd_share(args: argparse.Namespace) -> int:
+    from . import jobs
+    from .logs import reveal
+
+    console = Console()
+    path, count = jobs.pack()
+    console.print(f"\n[bold green]Packed {count} build record(s):[/bold green] {path}")
+    console.print("Send this file to the developer (for example upload it to the shared Google Drive folder).")
+    console.print("[dim]It contains your requests, the steps, the results, pictures and ratings. "
+                  "No API keys, file paths or user names.[/dim]")
+    if not getattr(args, "no_open", False):
+        reveal(path)
+    return 0
+
+
 def cmd_logs(args: argparse.Namespace) -> int:
     _hand_over_logs(Console(), open_explorer=not getattr(args, "no_open", False))
     return 0
@@ -170,13 +185,14 @@ def main(argv: list[str] | None = None) -> int:
         ("bench", cmd_bench, "score connected models on SolidWorks tasks"),
         ("web", cmd_web, "open the assistant in your browser"),
         ("logs", cmd_logs, "collect logs into a zip on the Desktop (no keys)"),
+        ("share", cmd_share, "pack your build records and ratings into a zip for the developer"),
         ("check", cmd_check, "check SolidWorks end to end, then collect the logs"),
     ):
         p = sub.add_parser(name, help=text)
         p.set_defaults(func=fn)
         if name == "setup":
             p.add_argument("provider", nargs="?", default="", help='set up only this provider, e.g. "openai"')
-        if name in ("logs", "check"):
+        if name in ("logs", "check", "share"):
             p.add_argument("--no-open", action="store_true", help="do not open File Explorer")
         if name == "check":
             p.add_argument("--part", default=None, help="test with a copy of this part instead of a test block")

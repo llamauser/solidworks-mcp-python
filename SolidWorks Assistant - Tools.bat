@@ -31,6 +31,7 @@ echo    5  Connect or change AI providers
 echo    6  Show connected AI providers
 echo    7  Score the AI models (uses some free requests)
 echo    8  Update to the latest version
+echo    9  Pack my builds and ratings to share
 echo    0  Exit
 echo.
 set "choice="
@@ -43,6 +44,7 @@ if "%choice%"=="5" goto setup
 if "%choice%"=="6" goto status
 if "%choice%"=="7" goto bench
 if "%choice%"=="8" goto update
+if "%choice%"=="9" goto share
 if "%choice%"=="0" exit /b 0
 goto menu
 
@@ -73,6 +75,10 @@ goto done
 
 :bench
 "%PY%" -m sw_agent bench
+goto done
+
+:share
+"%PY%" -m sw_agent share
 goto done
 
 :update

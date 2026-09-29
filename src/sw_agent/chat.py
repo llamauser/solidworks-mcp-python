@@ -35,6 +35,7 @@ Commands:
   /review builds show each plan before building it (run, edit, skip or stop)
   /review all    ask before every change        /review off   just build
   /context       what the AI receives with the next request
+  /share         pack your build records (with ratings) into a zip for the developer
   /tools full    offer every tool to the model       /tools lean   the smaller default set
   /quit          leave
 """
@@ -42,7 +43,14 @@ Commands:
 STYLE = {"thinking": "dim", "tool": "cyan", "result": "green", "model": "yellow", "error": "bold red"}
 
 
+LAST_JOB: dict = {}
+
+
 def render(console: Console, event: Event) -> None:
+    if event.kind == "job":
+        LAST_JOB.clear()
+        LAST_JOB.update(event.data or {})
+        return
     if event.kind == "reply":
         return
     if event.kind == "thinking":
@@ -182,7 +190,8 @@ async def run_chat(console: Console | None = None) -> int:
     while True:
         async with Toolbox(tool_names) as toolbox:
             assistant = Assistant(router, toolbox, on_event=lambda e: render(console, e),
-                                  transcript=Transcript("terminal"), approver=make_approver(console), review=review)
+                                  transcript=Transcript("terminal"), approver=make_approver(console), review=review,
+                                  interface="terminal")
             switch = await _loop(console, router, assistant)
             review = assistant.review
         if switch == "quit":
@@ -266,6 +275,13 @@ async def _loop(console: Console, router: Router, assistant: Assistant) -> str:
                                "all": "I will ask before every change in SolidWorks."}[arg])
             elif cmd == "context":
                 show_context(console, assistant)
+            elif cmd == "share":
+                from . import jobs
+                from .logs import reveal
+
+                path, count = jobs.pack()
+                console.print(f"Packed {count} build record(s) into [bold]{path}[/bold]. Send that file to the developer.")
+                reveal(path)
             else:
                 console.print("Unknown command. Type /help.")
             continue
@@ -275,6 +291,22 @@ async def _loop(console: Console, router: Router, assistant: Assistant) -> str:
             console.print("[yellow]Stopped.[/yellow]")
             continue
         console.print(Panel(Markdown(reply), border_style="cyan", title="assistant", title_align="left"))
+        if LAST_JOB.get("changed"):
+            await ask_rating(console, LAST_JOB["id"])
+
+
+async def ask_rating(console: Console, job_id: str) -> None:
+    from . import jobs
+
+    answer = (await asyncio.to_thread(console.input, "[dim]How did it turn out? 1-5 stars, Enter to skip:[/dim] ")).strip()
+    if not answer.isdigit() or not 1 <= int(answer) <= 5:
+        return
+    comment = (await asyncio.to_thread(console.input, "[dim]Anything wrong or missing? (Enter to skip):[/dim] ")).strip()
+    try:
+        jobs.rate(job_id, int(answer), [], comment)
+        console.print("[dim]Thank you, saved.[/dim]")
+    except ValueError:
+        pass
 
 
 def main() -> int:

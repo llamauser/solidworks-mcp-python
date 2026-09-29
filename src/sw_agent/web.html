@@ -100,6 +100,15 @@
   .pick label.check { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0; }
   #openaiBox { border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 8px; }
   .msg { border-top: 1px solid var(--line); padding: 6px 0; font-size: 13px; }
+  .rate { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          padding: 10px 14px; font-size: 13px; max-width: 85%; }
+  .rate .stars button { font-size: 18px; padding: 2px 8px; margin-right: 2px; }
+  .rate .stars button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .rate .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .rate .tags label { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+  .rate .tags input { margin-right: 4px; }
+  .rate input.comment { width: 100%; font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+                        background: var(--bg); color: var(--text); margin-bottom: 8px; }
   .msg b { text-transform: uppercase; font-size: 11px; color: var(--muted); letter-spacing: .04em; }
   @media (max-width: 560px) { .bubble { max-width: 100%; } header { gap: 8px; } }
 </style>
@@ -117,6 +126,7 @@
   </label>
   <button id="stopBtn" class="stop" type="button">Stop</button>
   <button id="contextBtn" type="button">Context</button>
+  <button id="shareBtn" type="button" title="Pack your build records into a zip to send to the developer">Share builds</button>
   <button id="modelsBtn" type="button">Models</button>
   <button id="newBtn" type="button">New conversation</button>
 </header>
@@ -319,6 +329,36 @@ function renderReview(e) {
   setThinking(false);
 }
 
+const RATE_TAGS = ["wrong size", "wrong shape", "missing part", "does not move", "parts misplaced", "too slow", "other"];
+
+function renderRating(e) {
+  const d = e.data || {};
+  if (!d.changed) return;
+  const card = add("rate", `
+    <div><strong>How did it turn out?</strong> <span class="why">Your rating helps make the assistant better.</span></div>
+    <div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-s="${n}">${"&#9733;".repeat(n)}</button>`).join("")}</div>
+    <div class="tags">${RATE_TAGS.map((t) => `<label><input type="checkbox" value="${esc(t)}">${esc(t)}</label>`).join("")}</div>
+    <input class="comment" type="text" placeholder="Anything else? (optional)">
+    <button type="button" class="primary save">Save rating</button> <span class="why note2"></span>`);
+  let stars = 0;
+  card.querySelectorAll(".stars button").forEach((b) => b.addEventListener("click", () => {
+    stars = +b.dataset.s;
+    card.querySelectorAll(".stars button").forEach((x) => x.classList.toggle("on", +x.dataset.s <= stars));
+  }));
+  card.querySelector(".save").addEventListener("click", async () => {
+    if (!stars) { card.querySelector(".note2").textContent = "Choose 1 to 5 stars first."; return; }
+    const tags = [...card.querySelectorAll(".tags input:checked")].map((x) => x.value);
+    const { status } = await api("/api/rate", { id: d.id, stars, tags, comment: card.querySelector(".comment").value });
+    card.querySelector(".note2").textContent = status === 200 ? "Thank you, saved." : "Could not save the rating.";
+  });
+}
+
+async function shareBuilds() {
+  const { data } = await api("/api/share", {});
+  if (data.ok) add("info", `Packed ${data.jobs} build record(s) into ${esc(data.path)}. Send that file to the developer.`);
+  else add("error", "Could not pack the build records.");
+}
+
 function closeCard(card, how) {
   if (card.classList.contains("done")) return;
   card.classList.add("done");
@@ -357,6 +397,7 @@ function render(e) {
     case "error": setThinking(false); add("error", esc(e.text)); break;
     case "reply": closeAllCards(); setThinking(false); add("bubble reply", markdown(e.text)); break;
     case "info": add("info", esc(e.text)); break;
+    case "job": renderRating(e); break;
     case "idle": closeAllCards(); setThinking(false); setBusy(false); refreshStatus(); break;
   }
 }
@@ -488,6 +529,7 @@ $("reviewSel").addEventListener("change", async () => {
   await api("/api/control", { action: "review", mode });
 });
 $("contextBtn").addEventListener("click", showContext);
+$("shareBtn").addEventListener("click", shareBuilds);
 $("contextClose").addEventListener("click", () => $("context").classList.remove("open"));
 $("modelsBtn").addEventListener("click", () => {
   $("models").classList.toggle("open"); $("context").classList.remove("open"); refreshStatus();

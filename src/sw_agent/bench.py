@@ -127,7 +127,7 @@ async def score_model(base: Router, cand: Candidate, tasks: list[Task] = TASKS, 
         started = time.monotonic()
         try:
             async with Toolbox() as toolbox:
-                assistant = Assistant(router, toolbox, max_steps=max_steps)
+                assistant = Assistant(router, toolbox, max_steps=max_steps, record=False)
                 reply = await assistant.send(task.prompt)
         finally:
             connection.use_app_factory(None)

@@ -13,14 +13,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
+import time
 import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from importlib import resources
 from typing import Any, Awaitable, Callable
 
-from . import extras
+from . import extras, jobs
 from .router import NoModelAvailable, Router
 
 log = logging.getLogger("sw_agent.assistant")
@@ -80,6 +82,12 @@ class Toolbox:
     @property
     def tool_names(self) -> set[str]:
         return {t["function"]["name"] for t in self.tools}
+
+    async def call_hidden(self, name: str, args: dict) -> str:
+        """Call a server tool the model is not offered (e.g. save_picture for the job record)."""
+        result = await self._client.call_tool(name, args)
+        texts = [c.text for c in result.content if getattr(c, "text", None)]
+        return "\n".join(texts) or json.dumps({"ok": not result.is_error})
 
     async def call(self, name: str, args: dict) -> str:
         if name not in self.tool_names:
@@ -285,7 +293,7 @@ Approver = Callable[[PendingCall], Awaitable[Decision]]
 class Assistant:
     def __init__(self, router: Router, toolbox: Toolbox, on_event: Callable[[Event], None] | None = None,
                  max_steps: int = MAX_STEPS, transcript: Any = None, approver: Approver | None = None,
-                 review: str = "off") -> None:
+                 review: str = "off", record: bool = True, interface: str = "") -> None:
         self.router = router
         self.toolbox = toolbox
         self.transcript = transcript
@@ -303,6 +311,11 @@ class Assistant:
         self.approver = approver
         self.review = review if review in REVIEW_TOOLS else "off"
         self.active_project: str | None = None  # its design summary goes into every request
+        self.record = record          # keep a job record of every request (see jobs.py)
+        self.interface = interface
+        self._job: jobs.Job | None = None
+        self._example = ""            # a well-rated similar past build, shown to the model
+        self.last_job_id: str | None = None
         self._stop = False
         router.on_event = lambda msg: self.on_event(Event("model", msg))
 
@@ -392,7 +405,8 @@ class Assistant:
         what the tools did, the reply); the current request is sent in full, except that tool
         results and long arguments older than the newest FULL_EXCHANGES exchanges are shortened."""
         block = self.design_block()
-        out = [{"role": "system", "content": self.system + ("\n\n" + block if block else "")}]
+        extra = "".join("\n\n" + part for part in (block, self._example) if part)
+        out = [{"role": "system", "content": self.system + extra}]
         users = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
         if not users:
             return out
@@ -423,6 +437,50 @@ class Assistant:
         return out
 
     async def send(self, text: str) -> str:
+        job = jobs.Job(text, self.interface, self.toolbox.tools if self.toolbox else None) if self.record else None
+        self._job = job
+        self._example = ""
+        try:
+            self._example = jobs.similar_example(text)
+        except Exception:  # noqa: BLE001 - examples are a bonus
+            log.warning("could not look for a similar past build", exc_info=True)
+        if self._example:
+            self.on_event(Event("info", "Using a similar build you rated well as an example."))
+        reply = ""
+        try:
+            reply = await self._send(text)
+            return reply
+        finally:
+            self._job = None
+            if job is not None:
+                await self._finish_job(job, reply)
+
+    async def _finish_job(self, job: jobs.Job, reply: str) -> None:
+        try:
+            picture = None
+            if job.changed:
+                folder = jobs.jobs_dir() / job.id
+                folder.mkdir(parents=True, exist_ok=True)
+                try:
+                    out = json.loads(await self.toolbox.call_hidden(
+                        "save_picture", {"file_path": str(folder / "picture.png")}))
+                    picture = out.get("picture") if out.get("ok") else None
+                    if picture and os.path.basename(picture) != "picture" + os.path.splitext(picture)[1]:
+                        picture = None
+                except Exception:  # noqa: BLE001 - the picture is optional
+                    log.info("no picture for the job record", exc_info=True)
+            design_data = None
+            if self.active_project:
+                from sw_mcp.sw import design
+
+                design_data = design.load(self.active_project)
+            job.finish(reply, self.active_project, design_data, picture)
+            self.last_job_id = job.id
+            self.on_event(Event("job", job.id, {"id": job.id, "changed": job.changed}))
+        except Exception:  # noqa: BLE001 - a record must never break the conversation
+            log.warning("could not save the job record", exc_info=True)
+
+    async def _send(self, text: str) -> str:
         self._stop = False
         self.history.append({"role": "user", "content": text})
         if self.transcript is not None:
@@ -445,6 +503,8 @@ class Assistant:
                 return str(exc)
             if self._stop:  # the user pressed stop while the model was thinking
                 return self._stopped()
+            if self._job is not None:
+                self._job.model(cand.label, result.usage)
             if self.transcript is not None:
                 self.transcript.write("model_answer", result.content[:TRANSCRIPT_CHARS], model=cand.label,
                                       latency_ms=result.latency_ms, usage=result.usage,
@@ -477,9 +537,13 @@ class Assistant:
                 if self.approver is not None and (name in REVIEW_TOOLS[self.review] or name == "run_command"):
                     decision = await self.approver(PendingCall(name, args, cand.label, (result.content or "")[:600]))
                     if decision.action == "stop":
+                        if self._job is not None:
+                            self._job.user_action("stopped", name)
                         self._answer_rest(calls[n:])
                         return self._stopped()
                     if decision.action == "skip":
+                        if self._job is not None:
+                            self._job.user_action("skipped", name, before=args, note=decision.note)
                         output = json.dumps({"ok": False, "error": "USER_SKIPPED",
                                              "message": "The user looked at this call and did not run it."
                                                         + (f' Their note: "{decision.note}"' if decision.note else ""),
@@ -488,6 +552,8 @@ class Assistant:
                         self.history.append({"role": "tool", "tool_call_id": call["id"], "content": output})
                         continue
                     if decision.args is not None and decision.args != args:
+                        if self._job is not None:
+                            self._job.user_action("edited", name, before=args, after=decision.args)
                         args = decision.args
                         call["function"]["arguments"] = json.dumps(args)  # the model sees what really ran
                         self.on_event(Event("info", "Running your edited version."))
@@ -510,7 +576,10 @@ class Assistant:
                                          "fix": "Stop. Tell the user what failed, in plain words, and ask how to "
                                                 "continue (or to send the logs from the Tools menu)."})
                 else:
+                    began = time.monotonic()
                     output = await self._call(name, args, cand)
+                    if self._job is not None:
+                        self._job.step(name, args, output, cand.label, time.monotonic() - began)
                     try:
                         data = json.loads(output)
                     except ValueError:

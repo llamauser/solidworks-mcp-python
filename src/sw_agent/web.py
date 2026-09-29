@@ -91,7 +91,7 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
                     session.pending = None
 
             session.assistant = Assistant(router, toolbox, on_event=lambda e: session.push(e.kind, e.text, e.data),
-                                          transcript=transcript_factory(), approver=approve)
+                                          transcript=transcript_factory(), approver=approve, interface="browser")
             state["s"] = session
             if not router.candidates():
                 session.push("error", "No AI model is connected yet. Close this window and run "
@@ -188,6 +188,30 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
                   if m.tools_ok}
         return JSONResponse({"ok": True, "models": listed[:300], "tested": sorted(tested)})
 
+    async def rate(request: Request) -> JSONResponse:
+        if not authorized(request):
+            return denied()
+        from . import jobs
+
+        body = await request.json()
+        try:
+            rating = jobs.rate(str(body.get("id", "")), int(body.get("stars", 0)),
+                               [str(t) for t in body.get("tags") or []], str(body.get("comment", "")))
+        except (ValueError, TypeError):
+            return JSONResponse({"ok": False, "error": "unknown job"}, status_code=400)
+        return JSONResponse({"ok": True, "rating": rating})
+
+    async def share(request: Request) -> JSONResponse:
+        if not authorized(request):
+            return denied()
+        from . import jobs
+        from .logs import reveal
+
+        path, count = await asyncio.to_thread(jobs.pack)
+        if request.query_params.get("open", "1") != "0":
+            reveal(path)
+        return JSONResponse({"ok": True, "path": str(path), "jobs": count})
+
     async def context(request: Request) -> JSONResponse:
         if not authorized(request):
             return denied()
@@ -280,6 +304,8 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
             Route("/api/status", status),
             Route("/api/control", control, methods=["POST"]),
             Route("/api/context", context),
+            Route("/api/rate", rate, methods=["POST"]),
+            Route("/api/share", share, methods=["POST"]),
             Route("/api/providers", providers),
             Route("/api/models", models),
             Route("/api/preview", preview, methods=["POST"]),

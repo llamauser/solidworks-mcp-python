@@ -55,7 +55,7 @@ def test_transcript_records_the_whole_conversation(tmp_logs):
         connection.use_app_factory(None)
     records = [json.loads(line) for line in transcript.path.read_text(encoding="utf-8").splitlines()]
     kinds = [r["kind"] for r in records]
-    assert kinds[0] == "user" and "tool_call" in kinds and "tool_output" in kinds and kinds[-1] == "reply"
+    assert kinds[0] == "user" and "tool_call" in kinds and "tool_output" in kinds and kinds[-2:] == ["reply", "job"]
     call = next(r for r in records if r["kind"] == "tool_call")
     assert call["text"] == "build_part" and '\\"box\\"' in call["arguments"]  # the full plan is kept
     answer = next(r for r in records if r["kind"] == "model_answer")
