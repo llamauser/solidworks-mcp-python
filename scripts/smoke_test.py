@@ -350,6 +350,13 @@ async def build_checks(client: Client, work: str) -> None:
     await step("revolve with its axis off the default planes (moved into place)", "build_part",
                lambda o: o.get("min_mm") == [-20.0, 69.0, -66.0] and o.get("max_mm") == [20.0, 111.0, -24.0],
                plan=json.dumps(journal))
+    named = {"references": "axis bore through 0,20,0 along x\nframe bank origin 0,40,0 turn z 30", "steps": [
+        {"op": "box", "x": [-40, 40], "y": [0, 40], "z": [-20, 20]},
+        {"op": "cylinder", "mode": "cut", "on_axis": "bore", "from": -41, "to": 41, "diameter": 12},
+        {"op": "box", "frame": "bank", "x": [-10, 10], "y": [-2, 50], "z": [-10, 10]}]}
+    await step("named axis and a turned frame (references)", "build_part",
+               lambda o: o.get("bodies") == 1 and 75 < o.get("max_mm", [0, 0])[1] < 90,
+               plan=json.dumps(named))
     disc = {"steps": [{"op": "revolve", "axis": "y", "profile": [[0, 0], [20, 0], [20, 10], [0, 10]]}]}
     await step("revolve a disc d40 x 10", "build_part",
                lambda o: abs(o.get("volume_mm3", 0) - 12566.4) < 130 and o.get("size_mm") == [40.0, 10.0, 40.0],

@@ -467,6 +467,11 @@ class FakeFeatureManager:
         merge = rest[-3] if len(rest) >= 3 else True
         doc.feature_count += 1
         feat = FakeFeature(doc, f"Revolve{doc.feature_count}", "Revolution" if not is_cut else "RevCut")
+        for (r1, h1), (r2, h2) in zip(rh, rh[1:] + rh[:1]):  # profile edges parallel to the axis: round faces
+            if abs(r1 - r2) < 1e-9 and r1 > 1e-9 and abs(h1 - h2) > 1e-9:
+                p0, p1 = list(c1), list(c1)
+                p0[ax], p1[ax] = min(h1, h2), max(h1, h2)
+                doc.cylinders.append({"p0": p0, "p1": p1, "radius": r1, "feature": feat})
         feat.faces = [FakeBoxFace(lo, hi)]
         feat.box = (lo, hi)
         feat.volume_m3 = -vol if is_cut else vol

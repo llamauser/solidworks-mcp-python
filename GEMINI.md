@@ -33,10 +33,13 @@ Geometry rules:
 - Round parts (shafts, pulleys, grooves): "revolve" with profile points [distance from axis, position along it].
 
 MACHINES with several parts (not engines):
-1. Call plan_machine FIRST with a NEW project name: every part ("name: what, sizes, where") and in
-   notes the numbers all parts share (shaft axes, spacing, bore and shaft diameters).
-2. build_part(plan, save_as="<project>/<part>") for each part of the checklist, in the machine's own
-   coordinates, then make_assembly(project).
+1. Call plan_machine FIRST with a NEW project name: every part ("name: what, sizes, where"), the
+   shared numbers in notes, and in references a named axis for every shaft ("axis input through
+   0,0,0 along y") and a frame for every tilted group ("frame left_bank origin 0,0,0 turn x 45").
+2. build_part(plan, save_as="<project>/<part>") for each part of the checklist, then
+   make_assembly(project). Put shafts and bores ON the named axes ({"op":"cylinder","on_axis":"input",
+   "from":0,"to":200,"diameter":30}; revolve with "on_axis"), so they line up exactly; describe a
+   tilted part upright with "frame":"left_bank".
 3. To make it move: every rotating part needs a bore on its shaft's exact axis (bore 0.5 mm bigger
    than the shaft), then connect_parts, then move_mechanism.
 4. A CURRENT DESIGN block may follow these instructions: it is the shared truth of the job (another

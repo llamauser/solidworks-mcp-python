@@ -73,6 +73,28 @@ def project_of_path(file_path: str) -> str | None:
         return None
 
 
+# ---------------------------------------------------------------- shared frames and axes
+def references(project: str):
+    from .references import References
+
+    return References.from_dict(load(project).get("references"))
+
+
+def set_references(project: str, text: str) -> list[str]:
+    """Add or replace named frames/axes (parsed from plan_machine's references text)."""
+    from .references import parse
+
+    new = parse(text)
+    data = load(project)
+    from .references import References
+
+    merged = References.from_dict(data.get("references")).merged(new)
+    data["references"] = merged.to_dict()
+    _event(data, f"references: {', '.join(list(new.frames) + list(new.axes))}")
+    _save(project, data)
+    return merged.describe()
+
+
 # ---------------------------------------------------------------- writing
 def parse_parts(text: str) -> list[dict]:
     """ "name: description" per line (or separated by ';') -> [{"name", "description"}]."""
@@ -133,7 +155,7 @@ def record_part(project: str, name: str, plan: dict | None, result: dict | None 
                                          if result and result.get("size_mm") else ""))
     if plan is not None:
         entry["plan"] = plan
-        entry["round_features"] = round_features(plan)
+        entry["round_features"] = round_features(plan, project)
     parts[name] = entry
     item = _plan_part(data, name)
     if item is not None:
@@ -177,18 +199,19 @@ def _pt(p) -> str:
     return "(" + ", ".join(_fmt(v) for v in p) + ")"
 
 
-def round_features(plan: dict) -> list[str]:
+def round_features(plan: dict, project: str | None = None) -> list[str]:
     """Shafts and bores of a part plan in plain words: what other parts must line up with."""
-    from .plan import Plan, shape_of
+    from .plan import Plan, plan_references, shape_of
 
     try:
-        steps = Plan.model_validate(plan).steps
+        parsed = Plan.model_validate(plan)
+        refs = plan_references(parsed, project)
     except Exception:  # noqa: BLE001 - a plan that does not parse has nothing to show
         return []
     out = []
-    for step in steps:
+    for step in parsed.steps:
         try:
-            shape = shape_of(step)
+            shape = shape_of(step, refs)
         except Exception:  # noqa: BLE001
             continue
         kind = "bore" if getattr(step, "mode", "add") == "cut" else "shaft"
@@ -230,6 +253,12 @@ def summary(project: str, max_chars: int = SUMMARY_CHARS) -> str:
         lines.append("Next: " + (todo[0] if todo else "all parts built; make_assembly, then connect_parts"))
     if plan.get("notes"):
         lines.append(f"Notes: {plan['notes']}")
+    refs = data.get("references")
+    if refs and (refs.get("frames") or refs.get("axes")):
+        from .references import References
+
+        lines.append("References (use them in plans: \"on_axis\" / \"frame\"): "
+                     + "; ".join(References.from_dict(refs).describe()))
     parts = data.get("parts") or {}
     if parts:
         lines.append("Built parts (world coordinates, mm):")

@@ -29,6 +29,8 @@ def build_part(
     {"op":"fillet|chamfer","size":r,"edges":"vertical|top|bottom|parallel_x|parallel_z|circular|all"}
     {"op":"repeat","copies":n,"step":[dx,dy,dz]}  {"op":"repeat_around","copies":n,"angle_step":deg,"center":[x,y,z]}
     Tilt a box/cylinder/prism: add "rotate":{"axis":"z","deg":45,"about":[x,y,z]} (right-hand rule).
+    Named references (plan_machine): {"op":"cylinder","on_axis":"input","from":0,"to":200,"diameter":30},
+    revolve with "on_axis" instead of axis/center, "frame":"left_bank" on a box/cylinder/prism (upright in the frame).
     Repeats copy the last shape, or the whole last repeated group. Fillets before pockets and holes.
     Example: {"steps":[{"op":"box","x":[-30,30],"y":[0,10],"z":[-20,20]},{"op":"fillet","size":5,"edges":"vertical"},
     {"op":"cylinder","mode":"cut","start":[-22,-1,-12],"end":[-22,11,-12],"diameter":6},

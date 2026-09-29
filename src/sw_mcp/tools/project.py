@@ -48,17 +48,21 @@ def plan_machine(
     project: Annotated[str, Field(description="A NEW project name for this machine, e.g. \"CVT 1\".")],
     goal: Annotated[str, Field(description="One or two sentences: what the machine is and does.")],
     parts: Annotated[str, Field(description='One part per line: "name: what it is, main sizes, where it sits".')],
-    notes: Annotated[str, Field(description="Shared numbers every part must use: axes, spacing, clearances.")] = "",
+    notes: Annotated[str, Field(description="Shared numbers every part must use: spacing, clearances.")] = "",
+    references: Annotated[str, Field(description='Named axes/frames, one per line: "axis input through 0,0,0 along y", '
+                                                 '"frame left_bank origin 0,0,0 turn x 45".')] = "",
 ) -> dict:
     """Write the plan of a machine with several parts: the checklist every AI model follows.
 
     Use when: starting a machine (anything with 2 or more parts). Call it FIRST, then build each part
-    with build_part(save_as="<project>/<name>"). Put shared numbers in notes (e.g. "input shaft axis:
-    Y through x=0,z=0; output shaft: Y through x=250,z=0; bores d30.5 for d30 shafts").
+    with build_part(save_as="<project>/<name>"). Name every shaft axis in references: parts then use
+    {"op":"cylinder","on_axis":"input","from":0,"to":200,"diameter":30} and line up exactly.
+    A frame (origin + turn) lets a tilted part (a V-engine bank) be described upright.
     Calling it again replaces the plan but keeps parts that are already built.
     Example: plan_machine(project="CVT 1", goal="Belt CVT, shafts 250 mm apart",
-             parts="input_shaft: d30 x 200 along Y at x=0\nprimary_pulley: two cones d150 on input_shaft",
-             notes="input axis Y at x=0,z=0; output axis Y at x=250,z=0")
+             parts="input_shaft: d30 x 200 on axis input\nprimary_pulley: two cones d150 on axis input",
+             references="axis input through 0,0,0 along y\naxis output through 250,0,0 along y",
+             notes="bores 0.5 mm bigger than the shafts")
     """
     items = design.parse_parts(parts)
     if not items:
@@ -66,6 +70,8 @@ def plan_machine(
                       'Give one part per line, like "input_shaft: d30 x 200 along Y at x=0".')
     pr.split_name(f"{project}/x")  # a usable project name
     design.set_plan(project, goal, items, notes)
+    if references.strip():
+        design.set_references(project, references)
     return {"project": project, "parts": [p["name"] for p in items], "design": design.summary(project),
             "next": f'Build the first part with build_part(save_as="{project}/{items[0]["name"]}").'}
 

@@ -13,12 +13,13 @@ import json
 import re
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from ..core.com_utils import try_call
 from ..core.errors import Code, SwError
 from . import modeling as m
 from . import project
+from . import references as refs_mod
 
 Vec3 = tuple[float, float, float]
 Range = tuple[float, float]
@@ -26,7 +27,7 @@ Mode = Literal["add", "cut"]
 
 
 class _Step(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class Rotate(BaseModel):
@@ -44,15 +45,31 @@ class BoxStep(_Step):
     y: Range
     z: Range
     rotate: Rotate | None = None
+    frame: str | None = None  # the numbers are in this named frame (plan_machine references)
 
 
 class CylinderStep(_Step):
     op: Literal["cylinder"]
     mode: Mode = "add"
-    start: Vec3
-    end: Vec3
+    start: Vec3 | None = None
+    end: Vec3 | None = None
     diameter: float = Field(gt=0)
     rotate: Rotate | None = None
+    frame: str | None = None
+    on_axis: str | None = None  # a named axis; then "from"/"to" are distances along it
+    from_: float | None = Field(default=None, alias="from")
+    to: float | None = None
+
+    @model_validator(mode="after")
+    def _ends(self):
+        if self.on_axis:
+            if self.from_ is None or self.to is None:
+                raise ValueError('with "on_axis" give "from" and "to" (distances along the axis)')
+            if self.start is not None or self.end is not None or self.frame:
+                raise ValueError('use either "on_axis" with "from"/"to", or "start"/"end"')
+        elif self.start is None or self.end is None:
+            raise ValueError('give "start" and "end", or "on_axis" with "from" and "to"')
+        return self
 
 
 def _pairs(value: Any) -> Any:
@@ -69,6 +86,7 @@ class PrismStep(_Step):
     start: float
     end: float
     rotate: Rotate | None = None
+    frame: str | None = None
 
     _points_from_text = field_validator("points", mode="before")(_pairs)
 
@@ -77,12 +95,19 @@ class RevolveStep(_Step):
     """Spin a half-profile of (radius, position along the axis) points around an axis."""
     op: Literal["revolve"]
     mode: Mode = "add"
-    axis: Literal["x", "y", "z"]
+    axis: Literal["x", "y", "z"] | None = None
+    on_axis: str | None = None  # a named axis; then profile positions are measured along it
     center: Vec3 = (0.0, 0.0, 0.0)
     profile: list[tuple[float, float]] = Field(min_length=3, max_length=64)
     angle: float = 360.0
 
     _profile_from_text = field_validator("profile", mode="before")(_pairs)
+
+    @model_validator(mode="after")
+    def _axis_given(self):
+        if not self.axis and not self.on_axis:
+            raise ValueError('give "axis" (x, y or z) or "on_axis" (a named axis)')
+        return self
 
 
 class EdgeStep(_Step):
@@ -120,6 +145,7 @@ class Expect(BaseModel):
 class Plan(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = None
+    references: str | None = None  # frames/axes for this part only (plan_machine shares them)
     steps: list[Step] = Field(min_length=1, max_length=200)
     expect: Expect | None = None
 
@@ -196,17 +222,23 @@ def parse_plan(text: str) -> Plan:
 
 
 # ---------------------------------------------------------------- dry run
-def shape_of(step: Any) -> m.Shape | m.Revolve | None:
+def shape_of(step: Any, refs: "refs_mod.References | None" = None) -> m.Shape | m.Revolve | None:
+    refs = refs or refs_mod.References()
     cut = getattr(step, "mode", "add") == "cut"
     shape: m.Shape | None = None
     if isinstance(step, BoxStep):
         shape = m.box_shape(*step.x, *step.y, *step.z, cut)
     elif isinstance(step, CylinderStep):
-        shape = m.cylinder_shape(*step.start, *step.end, step.diameter, cut)
+        if step.on_axis:
+            shape = refs_mod.cylinder_on_axis(refs.axis(step.on_axis), step.from_, step.to, step.diameter, cut)
+        else:
+            shape = m.cylinder_shape(*step.start, *step.end, step.diameter, cut)
     elif isinstance(step, PrismStep):
         pts = "; ".join(f"{a},{b}" for a, b in step.points)
         shape = m.prism_shape(step.axis, pts, step.start, step.end, cut)
     elif isinstance(step, RevolveStep):
+        if step.on_axis:
+            return refs_mod.revolve_on_axis(refs.axis(step.on_axis), step.profile, step.angle, cut)
         return m.revolve_spec(step.axis, step.center, step.profile, step.angle, cut)
     rot = getattr(step, "rotate", None)
     if shape is not None and rot is not None and abs(rot.deg) > 1e-9:
@@ -214,17 +246,36 @@ def shape_of(step: Any) -> m.Shape | m.Revolve | None:
             raise SwError(Code.BAD_ARGUMENT, "This cylinder is already slanted by its start and end, and it has a rotate too.",
                           "Use one of them: either a straight start/end plus rotate, or a slanted start/end alone.")
         shape.tilt = (rot.axis, rot.deg, tuple(rot.about))
+    frame = getattr(step, "frame", None)
+    if shape is not None and frame:
+        shape = refs_mod.in_frame(shape, refs.frame(frame))
     return shape
 
 
-def check_plan(plan: Plan) -> list[m.Shape | m.Revolve | None]:
+def plan_references(plan: Plan, project_name: str | None = None) -> "refs_mod.References":
+    """The project's shared frames/axes, plus any the plan declares itself."""
+    refs = refs_mod.References()
+    if project_name:
+        from . import design
+
+        refs = design.references(project_name)
+    if plan.references:
+        try:
+            refs = refs.merged(refs_mod.parse(plan.references))
+        except SwError as err:
+            raise SwError(Code.BAD_ARGUMENT, f"references: {err.message}", err.fix) from None
+    return refs
+
+
+def check_plan(plan: Plan, refs: "refs_mod.References | None" = None) -> list[m.Shape | m.Revolve | None]:
     """Validate geometry without SolidWorks. Returns the shape for each step (None otherwise)."""
+    refs = refs if refs is not None else plan_references(plan)
     shapes: list[m.Shape | m.Revolve | None] = []
     group = 0
     tilted = False
     for i, step in enumerate(plan.steps, 1):
         try:
-            shape = shape_of(step)
+            shape = shape_of(step, refs)
         except SwError as err:
             raise SwError(Code.BAD_ARGUMENT, f"Step {i} ({step.op}): {err.message}",
                           f"{err.fix} Nothing was built; send the corrected plan.") from None
@@ -296,7 +347,8 @@ def _record(target: tuple[str, str], plan: Plan, result: dict | None = None, err
 
 
 def _execute(app: Any, doc: Any | None, plan: Plan, save_as: str = "", keep_open: bool = False) -> dict:
-    shapes = check_plan(plan)
+    target = project.split_name(save_as) if save_as.strip() else None
+    shapes = check_plan(plan, plan_references(plan, target[0] if target else None))
     if save_as.strip():
         project.split_name(save_as)  # reject a bad name before building anything
     _close_failed_builds(app)
@@ -393,17 +445,20 @@ def _pt(p) -> str:
 def describe_step(step: Any) -> str:
     rot = getattr(step, "rotate", None)
     tilt = f", tilted {_n(rot.deg)} deg about {rot.axis.upper()} at {_pt(rot.about)}" if rot else ""
+    where = f" in frame {step.frame}" if getattr(step, "frame", None) else ""
     if isinstance(step, BoxStep):
         return (f"box x {_n(step.x[0])}..{_n(step.x[1])}, y {_n(step.y[0])}..{_n(step.y[1])}, "
-                f"z {_n(step.z[0])}..{_n(step.z[1])}{tilt}")
+                f"z {_n(step.z[0])}..{_n(step.z[1])}{tilt}{where}")
     if isinstance(step, CylinderStep):
-        return f"cylinder d{_n(step.diameter)} from {_pt(step.start)} to {_pt(step.end)}{tilt}"
+        if step.on_axis:
+            return f"cylinder d{_n(step.diameter)} on axis {step.on_axis} from {_n(step.from_)} to {_n(step.to)}"
+        return f"cylinder d{_n(step.diameter)} from {_pt(step.start)} to {_pt(step.end)}{tilt}{where}"
     if isinstance(step, PrismStep):
         return (f"prism along {step.axis.upper()} {_n(step.start)}..{_n(step.end)}, "
-                f"{len(step.points)} corners {' '.join(_pt(p) for p in step.points[:6])}{tilt}")
+                f"{len(step.points)} corners {' '.join(_pt(p) for p in step.points[:6])}{tilt}{where}")
     if isinstance(step, RevolveStep):
-        return (f"revolve {_n(step.angle)} deg about {step.axis.upper()} through {_pt(step.center)}, "
-                f"profile {' '.join(_pt(p) for p in step.profile[:6])}")
+        about = f"axis {step.on_axis}" if step.on_axis else f"{step.axis.upper()} through {_pt(step.center)}"
+        return f"revolve {_n(step.angle)} deg about {about}, profile {' '.join(_pt(p) for p in step.profile[:6])}"
     if isinstance(step, EdgeStep):
         return f"{step.op} {_n(step.size)} mm on the {step.edges} edges"
     if isinstance(step, RepeatStep):
@@ -413,11 +468,11 @@ def describe_step(step: Any) -> str:
     return step.op
 
 
-def preview(text: str) -> dict:
+def preview(text: str, project_name: str | None = None) -> dict:
     """Check a plan without SolidWorks and describe every step in plain words."""
     try:
         plan = parse_plan(text)
-        check_plan(plan)
+        check_plan(plan, plan_references(plan, project_name))
     except SwError as err:
         return err.to_dict()
     steps = [{"n": i, "op": s.op, "mode": getattr(s, "mode", ""), "what": describe_step(s)}

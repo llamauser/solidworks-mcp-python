@@ -11,7 +11,8 @@ def preview_call(name: str, args: dict) -> dict | None:
     if name == "build_part":
         from sw_mcp.sw import plan
 
-        return plan.preview(str(args.get("plan", "")))
+        save_as = str(args.get("save_as") or "").replace("\\", "/")
+        return plan.preview(str(args.get("plan", "")), save_as.split("/")[0] if "/" in save_as else None)
     if name == "make_engine":
         from sw_mcp.sw import engine
 
