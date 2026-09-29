@@ -48,14 +48,19 @@ def make_motion_study(
     rpm: Annotated[float, Field(gt=0, le=100000, description="Motor speed in revolutions per minute.")] = 60.0,
     seconds: Annotated[float, Field(gt=0, le=600, description="Length of the study.")] = 5.0,
     kind: Annotated[Literal["animation", "basic"], Field(description="animation = kinematic; basic = Basic Motion (physics).")] = "animation",
+    more_motors: Annotated[str, Field(description='Extra motors, one per line: "<part> rotary <rpm>", "<part> swing '
+                                                  '<degrees> <per second>" or "<part> slide <mm> <per second>" '
+                                                  '(add "reverse" for the opposite direction).')] = "",
 ) -> dict:
     """Create a SolidWorks Motion Study with a rotary motor on a part, calculate it and play it.
 
-    Use when: the user wants a motion study / animation they can replay or save as a video.
-    Needs joints first (connect_parts). If SolidWorks refuses a step, it says which one.
-    Example: make_motion_study(part="crankshaft", rpm=60, seconds=5)
+    Use when: the user wants a motion study they can replay or save as a video (for a quick look,
+    move_mechanism is faster). Needs joints first (connect_parts); parts not joined to a driven part
+    are named in a warning. Extra motors make other parts turn, swing or slide back and forth.
+    Example: make_motion_study(part="input_shaft", rpm=60, seconds=6,
+             more_motors="pulley_a_movable slide 10 0.25\npulley_b_movable slide 10 0.25 reverse")
     """
-    return mech.make_motion_study(sw.doc, part, rpm, seconds, kind)
+    return mech.make_motion_study(sw.doc, part, rpm, seconds, kind, more_motors)
 
 
 @sw_tool(needs="app", timeout=1800)

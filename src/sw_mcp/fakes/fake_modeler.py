@@ -700,6 +700,9 @@ class FakeComponent2:
         self.asm.selected.append(self)
         return True
 
+    def IsFixed(self) -> bool:
+        return self.fixed
+
 
 class FakeSelectData:
     Mark = 0
@@ -717,6 +720,7 @@ class FakeMotionStudy:
         self.duration = None
         self.accept_motor = accept_motor
         self.played = False
+        self.definitions: list = []
 
     def Activate(self):
         return True
@@ -728,20 +732,26 @@ class FakeMotionStudy:
     def CreateDefinition(self, kind):
         study = self
 
-        class MotorData:  # like ISimulationMotorFeatureData: object properties + ConstantSpeedMotor(rpm)
+        class MotorData:  # like ISimulationMotorFeatureData: object properties + motion methods
             MotorType = kind
             DirectionReference = None
             Location = None
+            ReverseDirection = False
             rpm = None
+            oscillate = None
 
             def ConstantSpeedMotor(self, speed):
                 self.rpm = speed
 
+            def OscillatingMotor(self, displacement, frequency):
+                self.oscillate = (displacement, frequency)
+
         self.definition = MotorData()
+        self.definitions.append(self.definition)
         return self.definition
 
     def CreateFeature(self, definition):
-        ready = definition.DirectionReference is not None and definition.rpm
+        ready = definition.DirectionReference is not None and (definition.rpm or definition.oscillate)
         return object() if self.accept_motor and ready else None
 
     def Calculate(self):

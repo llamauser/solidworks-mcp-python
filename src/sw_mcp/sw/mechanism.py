@@ -403,12 +403,175 @@ def _center(box) -> list[float] | None:
 
 
 # ---------------------------------------------------------------- SolidWorks Motion Study
-def make_motion_study(doc: Any, part: str, rpm: float, seconds: float, kind: str) -> dict:
-    """Create a Motion Study with a rotary motor on `part`. Best effort: every step is checked,
-    and the members of unfamiliar API objects are logged so a failure can be fixed quickly."""
-    asm = require_assembly(doc)
-    comp = find_component(asm, part)
+MOTOR_INTERFACE = "ISimulationMotorFeatureData"
+
+
+@dataclass
+class MotorSpec:
+    part: str
+    kind: str          # rotary | swing | slide
+    speed: float = 0.0  # rotary: rpm
+    amount: float = 0.0  # swing: degrees, slide: mm
+    hz: float = 0.0     # swing/slide: cycles per second
+    reverse: bool = False
+
+    def describe(self) -> str:
+        if self.kind == "rotary":
+            return f"{self.part}: turns at {self.speed:g} rpm"
+        unit = "deg" if self.kind == "swing" else "mm"
+        return (f"{self.part}: {self.kind}s {self.amount:g} {unit} back and forth, {self.hz:g} per second"
+                + (", opposite direction" if self.reverse else ""))
+
+
+def parse_motors(text: str) -> list[MotorSpec]:
+    """Extra motors, one per line: "<part> rotary <rpm>", "<part> swing <degrees> <per second>" or
+    "<part> slide <mm> <per second>", optionally followed by "reverse"."""
+    out = []
+    for raw in (text or "").replace(";", "\n").splitlines():
+        words = raw.replace(",", " ").split()
+        if not words:
+            continue
+        reverse = words[-1].lower() in ("reverse", "reversed", "opposite")
+        if reverse:
+            words = words[:-1]
+        try:
+            part, kind = words[0], words[1].lower()
+            numbers = [float(w) for w in words[2:]]
+        except (IndexError, ValueError):
+            raise SwError(Code.BAD_ARGUMENT, f"Cannot read the motor line '{raw.strip()}'.",
+                          'Write e.g. "pulley_a slide 10 0.5" or "fan rotary 120".') from None
+        if kind == "rotary" and len(numbers) == 1 and numbers[0] > 0:
+            out.append(MotorSpec(part, "rotary", speed=numbers[0], reverse=reverse))
+        elif kind in ("swing", "slide") and len(numbers) == 2 and numbers[0] > 0 and numbers[1] > 0:
+            out.append(MotorSpec(part, kind, amount=numbers[0], hz=numbers[1], reverse=reverse))
+        else:
+            raise SwError(Code.BAD_ARGUMENT, f"Cannot read the motor line '{raw.strip()}'.",
+                          'Use "<part> rotary <rpm>", "<part> swing <degrees> <per second>" or '
+                          '"<part> slide <mm> <per second>", optionally ending with "reverse".')
+    return out
+
+
+def joint_links(asm: Any) -> dict[str, set[str]]:
+    """Which parts are joined to which (by coaxial shaft/bore faces)."""
+    comps = components(asm)
+    links: dict[str, set[str]] = {comp_name(c): set() for c in comps}
+    faces = [f for c in comps for f in cylinder_faces(c)]
+    for a, b in find_joints(faces):
+        links[a.component].add(b.component)
+        links[b.component].add(a.component)
+    return links
+
+
+def unlinked_parts(asm: Any, drivers: list[str]) -> list[str]:
+    """Moving (not fixed) parts that no joint path connects to a driven part: they cannot move."""
+    links = joint_links(asm)
+    reach, todo = set(drivers), list(drivers)
+    while todo:
+        for other in links.get(todo.pop(), ()):
+            if other not in reach:
+                reach.add(other)
+                todo.append(other)
+    fixed = {comp_name(c) for c in components(asm) if try_call(c, "IsFixed") is True}
+    return sorted(n for n in links if n not in reach and n not in fixed)
+
+
+def _put(obj: Any, prop: str, value: Any) -> bool:
+    """Set a property; for object values late binding may need PROPERTYPUTREF, and names that do not
+    resolve are called by the DISPID from SolidWorks' type library."""
+    try:
+        setattr(obj, prop, value)
+        return True
+    except Exception as exc:  # noqa: BLE001 - try the other forms
+        first = exc
+    raw = getattr(value, "_oleobj_", value)
+    ids = []
+    try:
+        ids.append(obj._oleobj_.GetIDsOfNames(prop))
+    except Exception:  # noqa: BLE001
+        pass
+    known = typelib.member_id(MOTOR_INTERFACE, prop)
+    if known is not None and known not in ids:
+        ids.append(known)
+    for dispid in ids:
+        for kind in (pythoncom.INVOKE_PROPERTYPUTREF, pythoncom.INVOKE_PROPERTYPUT):
+            try:
+                obj._oleobj_.Invoke(dispid, 0, kind, 0, raw)
+                return True
+            except Exception:  # noqa: BLE001
+                continue
+    log.info("motor property %s failed: %s (dispids tried %s)", prop, first, ids)
+    return False
+
+
+def _invoke(obj: Any, method: str, *args: Any) -> bool:
+    try:
+        call(obj, method, *args)
+        return True
+    except Exception as exc:  # noqa: BLE001 - call it by its DISPID from the type library
+        first = exc
+    dispid = typelib.member_id(MOTOR_INTERFACE, method)
+    if dispid is not None:
+        try:
+            obj._oleobj_.Invoke(dispid, 0, pythoncom.INVOKE_FUNC, True, *args)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            log.info("%s by dispid %s failed: %s", method, dispid, exc)
+    log.info("%s failed: %s", method, first)
+    return False
+
+
+def _motor_type(kind: str) -> int | None:
+    if kind == "slide":
+        found = typelib.value("swFmAEMLinearMotor")
+        return found if found is not None else next(iter(
+            {k: v for k, v in typelib.search("motor").items() if "linear" in k.lower()}.values()), None)
+    found = typelib.value("swFmAEMRotaryMotor", "swFmAEMRotationalMotor", "swFmAEMRotaryMotorFeature")
+    if found is None:
+        found = next(iter({k: v for k, v in typelib.search("motor").items() if "rot" in k.lower()}.values()), None)
+    return found
+
+
+def _add_motor(asm: Any, study: Any, spec: MotorSpec) -> str | None:
+    """One motor feature, set as in the SOLIDWORKS API example (ISimulationMotorFeatureData):
+    DirectionReference + Location = the part's joint face, then the motion method."""
+    comp = find_component(asm, spec.part)
     axis = _joint_axis(asm, comp)
+    motor_type = _motor_type(spec.kind)
+    if motor_type is None:
+        raise SwError(Code.UNSUPPORTED, "Could not find SolidWorks' motor constants on this PC.",
+                      "Use move_mechanism to turn the part instead.")
+    definition = call(study, "CreateDefinition", motor_type)
+    if definition is None:
+        raise SwError(Code.SW_ERROR, "SolidWorks refused to create a motor.", "Use move_mechanism instead.")
+    _select(asm, [axis.face], 1)
+    done = [p for p in ("DirectionReference", "Location") if _put(definition, p, axis.face)]
+    if spec.reverse and _put(definition, "ReverseDirection", True):
+        done.append("ReverseDirection")
+    if spec.kind == "rotary":
+        ok = _invoke(definition, "ConstantSpeedMotor", float(spec.speed))  # rpm
+    elif spec.kind == "swing":
+        ok = _invoke(definition, "OscillatingMotor", float(spec.amount), float(spec.hz))  # degrees, Hz
+    else:  # slide: SolidWorks works in meters internally
+        ok = _invoke(definition, "OscillatingMotor", float(spec.amount) / 1000.0, float(spec.hz))
+    if ok:
+        done.append(spec.kind)
+    log.info("motor %s: settings accepted %s", spec.describe(), done)
+    feature = try_call(study, "CreateFeature", definition)
+    call(asm, "ClearSelection2", True)
+    return (try_call(feature, "Name") or spec.describe()) if feature is not None else None
+
+
+def make_motion_study(doc: Any, part: str, rpm: float, seconds: float, kind: str, more_motors: str = "") -> dict:
+    """A Motion Study with a rotary motor on `part` (and any extra motors), calculated and played."""
+    asm = require_assembly(doc)
+    specs = [MotorSpec(part, "rotary", speed=rpm)] + parse_motors(more_motors)  # check the text first
+    driven = [comp_name(find_component(asm, s.part)) for s in specs]
+    warnings = []
+    loose = unlinked_parts(asm, driven)
+    if loose:
+        warnings.append(f"{', '.join(loose)} {'is' if len(loose) == 1 else 'are'} not joined to "
+                        f"{', '.join(driven)} and will not move. Put their shafts and bores on the same axis "
+                        "(radius within 1 mm), rebuild them, and run connect_parts.")
     msm = call(call(asm, "Extension"), "GetMotionStudyManager")
     if msm is None:
         raise SwError(Code.UNSUPPORTED, "This SolidWorks does not offer motion studies through its API.",
@@ -416,84 +579,38 @@ def make_motion_study(doc: Any, part: str, rpm: float, seconds: float, kind: str
     study = try_call(msm, "CreateMotionStudy")
     if study is None:
         raise SwError(Code.SW_ERROR, "SolidWorks could not create a motion study.", "Use move_mechanism instead.")
-    log.info("motion study members: %s", typelib.member_names(study))
     try_call(study, "Activate")
     type_names = {"animation": ("swMotionStudyTypeAssembly", "swMotionStudyTypeAnimation"),
                   "basic": ("swMotionStudyTypePhysicalSimulation", "swMotionStudyTypeBasicMotion")}[kind]
     study_type = typelib.value(*type_names)
-    notes = []
     if study_type is not None:
         try:
             study.StudyType = study_type
         except Exception as exc:  # noqa: BLE001
-            notes.append(f"could not set the study type ({exc})")
+            warnings.append(f"could not set the study type ({exc})")
     for attempt in (lambda: call(study, "SetDuration", float(seconds)), lambda: setattr(study, "Duration", float(seconds))):
         try:
             attempt()
             break
         except Exception:  # noqa: BLE001
             continue
-
-    motor_type = typelib.value("swFmAEMRotaryMotor", "swFmAEMRotationalMotor", "swFmAEMRotaryMotorFeature")
-    if motor_type is None:
-        found = typelib.search("motor")
-        log.info("motor constants found: %s", found)
-        rot = {k: v for k, v in found.items() if "rot" in k.lower()}
-        motor_type = next(iter(rot.values()), None)
-    if motor_type is None:
-        raise SwError(Code.UNSUPPORTED, "Could not find SolidWorks' rotary-motor constant on this PC.",
-                      "The study was created without a motor. Use move_mechanism to turn the part instead.")
-    definition = call(study, "CreateDefinition", motor_type)
-    if definition is None:
-        raise SwError(Code.SW_ERROR, "SolidWorks refused to create the motor definition.", "Use move_mechanism.")
-    members = typelib.member_names(definition)
-    log.info("motor definition members: %s", members)
-    _select(asm, [axis.face], 1)
-    _configure_motor(definition, axis, rpm)
-    feature = try_call(study, "CreateFeature", definition)
-    call(asm, "ClearSelection2", True)
-    if feature is None:
-        raise SwError(Code.SW_ERROR,
-                      "The motion study was created, but SolidWorks did not accept the motor.",
+    made, refused = [], []
+    for spec in specs:
+        name = _add_motor(asm, study, spec)
+        (made if name else refused).append(spec.describe())
+    if not made:
+        raise SwError(Code.SW_ERROR, "The motion study was created, but SolidWorks did not accept the motor.",
                       "Tell the user: open the Motion Study tab and add a rotary motor on the "
-                      f"{comp_name(comp)} by hand; the details are in the log for the developer.")
+                      f"{driven[0]} by hand; the details are in the log for the developer.")
     calculated = try_call(study, "Calculate")
     try_call(study, "Play")
-    out: dict[str, Any] = {"motion_study": try_call(study, "Name") or "Motion Study",
-                           "motor_on": comp_name(comp), "rpm": rpm, "seconds": seconds, "type": kind,
+    out: dict[str, Any] = {"motion_study": try_call(study, "Name") or "Motion Study", "motor_on": driven[0],
+                           "motors": made, "rpm": rpm, "seconds": seconds, "type": kind,
                            "calculated": calculated is not False}
-    if notes:
-        out["notes"] = notes
+    if refused:
+        warnings.append("SolidWorks did not accept these motors: " + "; ".join(refused))
+    if warnings:
+        out["warnings"] = warnings
     out["next"] = ("It plays in SolidWorks now (Motion Study tab at the bottom). To save a video: "
                    "in that tab, click 'Save Animation'.")
     return out
-
-
-def _put(obj: Any, prop: str, value: Any) -> bool:
-    """Set a property that holds an object (face, component). Late binding sometimes needs
-    PROPERTYPUTREF instead of PROPERTYPUT for object values."""
-    try:
-        setattr(obj, prop, value)
-        return True
-    except Exception as exc:  # noqa: BLE001 - try the by-reference form below
-        first = exc
-    try:
-        dispid = obj._oleobj_.GetIDsOfNames(prop)
-        obj._oleobj_.Invoke(dispid, 0, pythoncom.INVOKE_PROPERTYPUTREF, 0, getattr(value, "_oleobj_", value))
-        return True
-    except Exception as exc:  # noqa: BLE001
-        log.info("motor property %s failed: %s / %s", prop, first, exc)
-        return False
-
-
-def _configure_motor(definition: Any, axis: CylFace, rpm: float) -> list[str]:
-    """ISimulationMotorFeatureData (SOLIDWORKS API help, 'Create Linear Motor Feature Example'):
-    the motor turns about DirectionReference, located on Location, at ConstantSpeedMotor(rpm)."""
-    done = [p for p in ("DirectionReference", "Location") if _put(definition, p, axis.face)]
-    try:
-        call(definition, "ConstantSpeedMotor", float(rpm))  # speed in RPM
-        done.append("ConstantSpeedMotor")
-    except Exception as exc:  # noqa: BLE001
-        log.info("ConstantSpeedMotor failed: %s", exc)
-    log.info("motor settings accepted: %s", done)
-    return done

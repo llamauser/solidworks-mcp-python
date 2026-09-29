@@ -84,8 +84,41 @@ def member_names(obj) -> list[str]:
         "QueryInterface", "AddRef", "Release", "GetTypeInfoCount", "GetTypeInfo", "GetIDsOfNames", "Invoke"))
 
 
+@lru_cache(maxsize=32)
+def interface_members(interface: str) -> dict[str, int]:
+    """Member name -> DISPID of a SolidWorks interface (e.g. "ISimulationMotorFeatureData"), read
+    from the type libraries. Lets us call an object whose late-bound names do not resolve."""
+    out: dict[str, int] = {}
+    wanted = {interface.lower(), interface.lower().lstrip("i")}
+    for path in _tlb_files():
+        try:
+            lib = pythoncom.LoadTypeLib(str(path))
+        except pythoncom.com_error:
+            continue
+        for i in range(lib.GetTypeInfoCount()):
+            try:
+                if lib.GetDocumentation(i)[0].lower() not in wanted:
+                    continue
+                info = lib.GetTypeInfo(i)
+                attr = info.GetTypeAttr()
+                for j in range(attr.cFuncs):
+                    fd = info.GetFuncDesc(j)
+                    names = info.GetNames(fd.memid)
+                    if names:
+                        out.setdefault(names[0], int(fd.memid))
+            except (pythoncom.com_error, TypeError, ValueError):
+                continue
+    log.info("%s members from the type library: %s", interface, sorted(out))
+    return out
+
+
+def member_id(interface: str, member: str) -> int | None:
+    return interface_members(interface).get(member)
+
+
 def clear_cache() -> None:
     constants.cache_clear()
+    interface_members.cache_clear()
 
 
 if os.environ.get("SW_MCP_DUMP_CONSTANTS"):  # debugging aid: python -c "import sw_mcp.core.typelib"

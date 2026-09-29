@@ -7,7 +7,7 @@ import json
 import pytest
 
 from sw_mcp.core import connection, typelib
-from sw_mcp.core.errors import Code
+from sw_mcp.core.errors import Code, SwError
 from sw_mcp.fakes.fake_modeler import make_modeling_app
 from sw_mcp.sw import mechanism as mech
 from sw_mcp.sw import modeling as m
@@ -181,3 +181,58 @@ def test_motion_study_sets_the_motor_like_the_solidworks_example(app, monkeypatc
     out = parse(make_motion_study(part="crank", rpm=600, seconds=5))
     motor = app.created[-1].motion.study.definition
     assert out["ok"] and motor.rpm == 600 and motor.DirectionReference is not None and motor.Location is not None
+
+
+def test_motor_lines_are_read_or_explained():
+    specs = mech.parse_motors("sheave_a slide 10 0.25\nsheave_b slide 10 0.25 reverse; arm swing 30 1\nfan rotary 120")
+    assert [(s.part, s.kind, s.reverse) for s in specs] == [
+        ("sheave_a", "slide", False), ("sheave_b", "slide", True), ("arm", "swing", False), ("fan", "rotary", False)]
+    assert specs[0].amount == 10 and specs[0].hz == 0.25 and specs[3].speed == 120
+    for bad in ("sheave slide 10", "fan rotary", "fan spin 3", "x slide -1 2"):
+        with pytest.raises(SwError) as info:
+            mech.parse_motors(bad)
+        assert info.value.code == Code.BAD_ARGUMENT and "slide <mm>" in info.value.fix
+
+
+COLLAR = {"steps": [{"op": "cylinder", "start": [-40, 30, 0], "end": [-20, 30, 0], "diameter": 40},
+                    {"op": "cylinder", "mode": "cut", "start": [-41, 30, 0], "end": [-19, 30, 0], "diameter": 20.5}]}
+
+
+def test_extra_motors_and_a_warning_for_parts_that_cannot_move(app, monkeypatch):
+    for name, plan in (("block", BLOCK), ("crank", CRANK), ("collar", COLLAR), ("head", HEAD)):
+        assert parse(build_part(plan=json.dumps(plan), save_as=f"Mini/{name}"))["ok"]
+    parse(make_assembly(project="Mini", name="Mini"))
+    parse(connect_parts(fixed_part="block"))
+    asm = app.created[-1]
+    next(c for c in asm.components if c.Name2 == "head-1").fixed = False  # loose: joined to nothing
+    monkeypatch.setattr(typelib, "constants", lambda: {"swFmAEMRotaryMotor": 7, "swFmAEMLinearMotor": 8,
+                                                        "swMotionStudyTypeAssembly": 1})
+    out = parse(make_motion_study(part="crank", rpm=60, seconds=4, more_motors="collar slide 10 0.5 reverse"))
+    assert out["ok"] and len(out["motors"]) == 2 and "collar: slides 10 mm" in out["motors"][1]
+    slide = asm.motion.study.definitions[1]
+    assert slide.MotorType == 8 and slide.oscillate == (0.01, 0.5) and slide.ReverseDirection is True
+    assert any("head-1" in w and "not joined" in w for w in out["warnings"])
+    assert parse(make_motion_study(part="crank", more_motors="collar wobble"))["error"] == Code.BAD_ARGUMENT
+
+
+def test_motor_settings_fall_back_to_the_type_library_ids(monkeypatch):
+    calls = []
+
+    class Raw:
+        def GetIDsOfNames(self, name):
+            raise Exception("unknown name")
+
+        def Invoke(self, dispid, lcid, kind, *args):
+            calls.append((dispid, kind, args))
+
+    class Stubborn:
+        _oleobj_ = Raw()
+
+        def __setattr__(self, name, value):
+            raise AttributeError("Property '<unknown>.X' can not be set.")
+
+    monkeypatch.setattr(typelib, "member_id", lambda iface, member: {"DirectionReference": 5, "ConstantSpeedMotor": 9}.get(member))
+    obj = Stubborn()
+    assert mech._put(obj, "DirectionReference", "face") and calls[0][0] == 5
+    assert mech._invoke(obj, "ConstantSpeedMotor", 60.0) and calls[-1][0] == 9 and calls[-1][2][-1] == 60.0
+    assert not mech._put(obj, "Unknown", 1)
