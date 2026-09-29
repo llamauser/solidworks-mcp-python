@@ -693,8 +693,9 @@ class Modeler:
         raise SwError(
             Code.SW_ERROR,
             f"SolidWorks could not {verb} this shape where it was asked (tried {len(tried)} ways).",
-            ("For a cut, make sure the shape overlaps the existing part. For an added shape, make sure it "
-             "touches the part. Call get_model_summary to see where the part is."),
+            ("For a cut, make sure the shape overlaps material: if the part already has a hole or gap "
+             "there (e.g. a revolve profile that starts at that radius), leave this cut out. For an added "
+             "shape, make sure it touches the part. Call get_model_summary to see where the part is."),
         )
 
     def build(self, shape: Shape) -> dict:

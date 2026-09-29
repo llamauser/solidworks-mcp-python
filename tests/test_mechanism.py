@@ -163,3 +163,21 @@ def test_list_project_hides_lock_files(app, tmp_path):
     (folder / "~$block.SLDPRT").write_bytes(b"lock")
     listed = parse(list_project_tool(project="Mini"))
     assert "~$block" not in listed["parts"]
+
+
+def test_rod_between_the_two_halves_of_a_pin_hole_is_a_joint():
+    """Log 2026-09-28 15:56: on real SolidWorks the piston's slot splits its pin hole into two faces
+    beside the rod, so the faces sit side by side (0.5 mm gap) instead of overlapping."""
+    rod = mech.CylFace("rod1-1", None, [-10.6, 150, 0], [1, 0, 0], 10.9, 0, 21.2)
+    pin_half = mech.CylFace("piston1-1", None, [11.1, 150, 0], [1, 0, 0], 10.6, 0, 32)
+    far = mech.CylFace("piston1-1", None, [20, 150, 0], [1, 0, 0], 10.6, 0, 32)
+    assert mech.coaxial(rod, pin_half) and not mech.coaxial(rod, far)
+
+
+def test_motion_study_sets_the_motor_like_the_solidworks_example(app, monkeypatch):
+    build_engine()
+    parse(connect_parts())
+    monkeypatch.setattr(typelib, "constants", lambda: {"swFmAEMRotaryMotor": 7, "swMotionStudyTypeAssembly": 1})
+    out = parse(make_motion_study(part="crank", rpm=600, seconds=5))
+    motor = app.created[-1].motion.study.definition
+    assert out["ok"] and motor.rpm == 600 and motor.DirectionReference is not None and motor.Location is not None

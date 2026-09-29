@@ -28,6 +28,7 @@ MATE_CONCENTRIC = 1       # swMateType_e
 ALIGN_CLOSEST = 2         # swMateAlign_e
 AXIS_TOL_MM = 0.05        # shaft and bore axes must coincide within this
 CLEARANCE_MM = 1.0        # largest radius difference still treated as "shaft in bore"
+AXIAL_GAP_MM = 1.5        # coaxial faces this close along the axis still form a joint
 
 
 # ---------------------------------------------------------------- geometry helpers (pure)
@@ -104,7 +105,9 @@ def coaxial(a: CylFace, b: CylFace) -> bool:
     shift = _dot(_sub(b.origin, a.origin), a.axis)
     sign = 1.0 if _dot(a.axis, b.axis) > 0 else -1.0
     b_lo, b_hi = sorted((shift + sign * b.lo, shift + sign * b.hi))
-    return min(a.hi, b_hi) - max(a.lo, b_lo) > 0.1  # they overlap along the axis
+    # They overlap along the axis, or sit side by side with a small gap: a rod between the two
+    # halves of a piston's pin hole (the slot splits the hole into two faces).
+    return min(a.hi, b_hi) - max(a.lo, b_lo) > -AXIAL_GAP_MM
 
 
 def find_joints(faces: list[CylFace]) -> list[tuple[CylFace, CylFace]]:
@@ -419,11 +422,7 @@ def make_motion_study(doc: Any, part: str, rpm: float, seconds: float, kind: str
     members = typelib.member_names(definition)
     log.info("motor definition members: %s", members)
     _select(asm, [axis.face], 1)
-    for setter in _motor_setters(definition, axis, rpm, members):
-        try:
-            setter()
-        except Exception as exc:  # noqa: BLE001 - log and keep trying the other properties
-            log.info("motor property failed: %s", exc)
+    _configure_motor(definition, axis, rpm)
     feature = try_call(study, "CreateFeature", definition)
     call(asm, "ClearSelection2", True)
     if feature is None:
@@ -443,14 +442,31 @@ def make_motion_study(doc: Any, part: str, rpm: float, seconds: float, kind: str
     return out
 
 
-def _motor_setters(definition: Any, axis: CylFace, rpm: float, members: list[str]):
-    """Property assignments to try on the motor definition (names differ between releases)."""
-    rad_s = rpm * 2 * math.pi / 60
-    yield lambda: setattr(definition, "MotorType", typelib.value("swMotorTypeRotary", "swRotaryMotor") or 0)
-    if "SetDirectionReference" in members:
-        yield lambda: call(definition, "SetDirectionReference", axis.face)
-    if "SetLocationReference" in members:
-        yield lambda: call(definition, "SetLocationReference", axis.face)
-    for prop in ("ConstantSpeed", "Speed", "MotorSpeed", "Velocity"):
-        if not members or prop in members:
-            yield (lambda p=prop: setattr(definition, p, rad_s))
+def _put(obj: Any, prop: str, value: Any) -> bool:
+    """Set a property that holds an object (face, component). Late binding sometimes needs
+    PROPERTYPUTREF instead of PROPERTYPUT for object values."""
+    try:
+        setattr(obj, prop, value)
+        return True
+    except Exception as exc:  # noqa: BLE001 - try the by-reference form below
+        first = exc
+    try:
+        dispid = obj._oleobj_.GetIDsOfNames(prop)
+        obj._oleobj_.Invoke(dispid, 0, pythoncom.INVOKE_PROPERTYPUTREF, 0, getattr(value, "_oleobj_", value))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.info("motor property %s failed: %s / %s", prop, first, exc)
+        return False
+
+
+def _configure_motor(definition: Any, axis: CylFace, rpm: float) -> list[str]:
+    """ISimulationMotorFeatureData (SOLIDWORKS API help, 'Create Linear Motor Feature Example'):
+    the motor turns about DirectionReference, located on Location, at ConstantSpeedMotor(rpm)."""
+    done = [p for p in ("DirectionReference", "Location") if _put(definition, p, axis.face)]
+    try:
+        call(definition, "ConstantSpeedMotor", float(rpm))  # speed in RPM
+        done.append("ConstantSpeedMotor")
+    except Exception as exc:  # noqa: BLE001
+        log.info("ConstantSpeedMotor failed: %s", exc)
+    log.info("motor settings accepted: %s", done)
+    return done

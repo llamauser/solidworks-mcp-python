@@ -460,7 +460,8 @@ class Assistant:
                     self.transcript.write("tool_call", name, arguments=json.dumps(args)[:TRANSCRIPT_CHARS])
                 self.on_event(Event("tool", name, {"args": args}))
                 key = name + json.dumps(args, sort_keys=True)
-                stuck = [k for k, c in same_error.items() if k.startswith(name + "|") and c >= 2]
+                target = str(args.get("save_as") or args.get("project") or args.get("part") or "")
+                stuck = [k for k, c in same_error.items() if k.startswith(f"{name}|{target}|") and c >= 2]
                 if key in failed:
                     output = json.dumps({"ok": False, "error": "REPEATED_CALL",
                                          "message": f"This exact call already failed: {failed[key]}",
@@ -480,7 +481,8 @@ class Assistant:
                         data = None
                     if isinstance(data, dict) and data.get("ok") is False:
                         failed[key] = str(data.get("message", ""))[:300]
-                        gist = name + "|" + re.sub(r"[-\d.]+", "#", str(data.get("message", "")))[:200]
+                        target = str(args.get("save_as") or args.get("project") or args.get("part") or "")
+                        gist = f"{name}|{target}|" + re.sub(r"[-\d.]+", "#", str(data.get("message", "")))[:200]
                         same_error[gist] = same_error.get(gist, 0) + 1
                 if self.transcript is not None:
                     self.transcript.write("tool_output", output[:TRANSCRIPT_CHARS], tool=name)

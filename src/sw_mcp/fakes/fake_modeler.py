@@ -726,10 +726,23 @@ class FakeMotionStudy:
         return True
 
     def CreateDefinition(self, kind):
-        return type("MotorData", (), {"MotorType": 0})()
+        study = self
+
+        class MotorData:  # like ISimulationMotorFeatureData: object properties + ConstantSpeedMotor(rpm)
+            MotorType = kind
+            DirectionReference = None
+            Location = None
+            rpm = None
+
+            def ConstantSpeedMotor(self, speed):
+                self.rpm = speed
+
+        self.definition = MotorData()
+        return self.definition
 
     def CreateFeature(self, definition):
-        return object() if self.accept_motor else None
+        ready = definition.DirectionReference is not None and definition.rpm
+        return object() if self.accept_motor and ready else None
 
     def Calculate(self):
         return True
