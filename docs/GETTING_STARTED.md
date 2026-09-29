@@ -97,6 +97,13 @@ If the result is not right, just say what to change: "the holes should be 8 mm, 
 - **Context:** shows exactly what the AI receives: its instructions, the tools, and the
   conversation (older steps are shortened to save your free quota).
 - Every step line can be opened to see what exactly was sent to SolidWorks and what came back.
+- **Rating:** after a build a small card asks "How did it turn out?" (1-5 stars, quick tags,
+  a comment). Every request is recorded on this PC (what you asked, the steps, which AI model did
+  them, the result and a picture). Nothing is sent anywhere by itself.
+- **Share builds:** packs those records and your ratings into one zip on your Desktop. Send it to
+  the developer (for example upload it to the shared Google Drive folder). It contains no API keys,
+  no file paths and no user names. Builds you rated 4 or 5 stars are also shown to the AI as
+  examples when you ask for something similar.
 
 In the terminal version the same things are commands: `/use openai gpt-5-mini` (add `only`),
 `/models openai`, `/internet on`, `/terminal on`, `/review builds`, `/context`.
