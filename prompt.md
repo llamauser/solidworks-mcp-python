@@ -327,7 +327,7 @@ Root cause: every model rebuilds the geometry in its head from a (compressed) ch
 
 ### Order
 A1-A3 (design state + summary + handoff), then C1-C2 locally (records + feedback + "my good plans" as examples), then B1-B3, then frames/axes, then C4 upload (needs hosting decision).
-Open decisions for the user: where to host shared data and who operates it; opt-in default; whether pictures and geometry may be collected.
+Decisions (user, 2026-09-29): job records are collected LOCALLY and ON by default; nothing is uploaded automatically. Users pack them into a zip with one click (like the logs) and upload it where the developer tells them (Google Drive for now; automate the upload later). A record may contain the request, plans (+ user edits), steps with models and errors, the final geometry numbers and a picture of the result. NOT the SolidWorks files. Keys, file paths and user names are always stripped. When uploading gets automated, show a clear notice first (GDPR).
 
 **Why GPT-5.6 did better than the free models (logs 15:44-15:57):** one model for the whole task (the free runs switched between 4-5 models mid-task, each with its own idea of the geometry); no rate limits / 413s / broken tool calls; 2-15 s answers; it chose make_engine for the I4 spec at once and passed bore/stroke correctly; consistent coordinates across parts (shafts at x=+-125 for 250 mm spacing); it read errors and changed approach, and stopped honestly with options. Its weak spots: static CVT with no bores (no joints), flat sheaves instead of cones, a redundant cut, windows kept open, motion study instead of move_mechanism.
 
