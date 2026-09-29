@@ -301,6 +301,34 @@ The user does NOT like hard-coding machines (make_engine is a fixed recipe: bloc
 6. Measure models instead of guessing: add engine/CVT/hinge tasks to `sw-agent bench`.
 Other ideas on the list: a picture of the result after each build (SaveBMP -> browser, and for vision models), conversations that survive a restart, real cancel (SolidWorks work in a separate process).
 
+## 7. Plan (2026-09-29): one shared picture across models, motion studies, learning from results
+
+### A. One shared picture when models switch (switching is the normal case with free providers)
+Root cause: every model rebuilds the geometry in its head from a (compressed) chat history, and each one does it differently.
+1. **Design state owned by the program** (`<project>/design.json`): parts with their plans, sizes and key features (bores/shafts: axis, diameter), frames/axes, the assembly, joints, status per part (todo/built/failed + last error). Every tool updates it. A compact summary is put in EVERY request ("Current design: ..."), so a new model reads the same facts instead of guessing from the chat.
+2. **The plan is the contract**: the first request writes the machine plan (parts list, frames, interfaces, main dimensions) into design.json; it is shown to the user (review card) and later steps execute the checklist ("next: build pulley_b per plan"). A model that takes over continues the checklist instead of re-inventing the design.
+3. **Handoff note on every switch**: when the router changes model mid-task, a short system note says "you are taking over; plan + state + what the last model was doing".
+4. **Planner and workers**: the strongest available model writes/changes the plan (one request); any model executes steps. Stick to one model for a whole job, not just one message.
+5. Named frames/axes (section 6) make the shared picture exact.
+
+### B. Motion studies
+1. Verify the fixed motor on real SW (smoke test step; log ISimulationMotorFeatureData member DISPIDs from sldworks.tlb and invoke by DISPID if late binding fails).
+2. Check the mechanism before a study: every moving part must be linked to the driven part through joints; report the missing link ("rod2 is not connected to piston2") instead of a SolidWorks failure.
+3. General motors instead of one rotary motor: make_motion_study(motors=[{part, type rotary|linear, axis ref, speed | oscillate amplitude/frequency/phase}]) using ConstantSpeedMotor / OscillatingMotor / DistanceMotor. The CVT = rotary on the input shaft + opposite-phase oscillating linear motors on the movable sheaves.
+4. One "motion description" per project (exact kinematics like the engine's .motion.json, or the motors list) feeds both the live move_mechanism preview and the SolidWorks study.
+5. Research: saving the study as a video through the API.
+
+### C. Learning from every build (data flywheel)
+1. **Job record** (local first): request text, the plan and every change to it, each tool call/result with the model that made it, times, tokens, errors, retries, final geometry (sizes, bodies, joints), a picture of the result, app/guide/tool-schema versions.
+2. **User feedback** after each job: 1-5 stars or thumbs, tags (wrong size, wrong shape, missing part, does not move), optional text. Implicit signals: plans the user edited in review (model plan vs corrected plan = best training data), skips/stops, rebuilds.
+3. **Privacy**: opt-in, explained in plain words, default off; strip paths, user names and keys; show exactly what would be sent; per-job "share" switch; delete on request (EU/GDPR: the user is in France).
+4. **Sharing**: opt-in upload to a small backend (HTTPS endpoint + storage + database), random install id.
+5. **Uses**: an eval set of real requests for `sw-agent bench`; model scores per task type shipped to all installs (better routing); retrieval of highly rated plans as examples for similar new requests (quick win, also locally); later fine-tuning an open model on request -> plan (+ user corrections).
+
+### Order
+A1-A3 (design state + summary + handoff), then C1-C2 locally (records + feedback + "my good plans" as examples), then B1-B3, then frames/axes, then C4 upload (needs hosting decision).
+Open decisions for the user: where to host shared data and who operates it; opt-in default; whether pictures and geometry may be collected.
+
 **Why GPT-5.6 did better than the free models (logs 15:44-15:57):** one model for the whole task (the free runs switched between 4-5 models mid-task, each with its own idea of the geometry); no rate limits / 413s / broken tool calls; 2-15 s answers; it chose make_engine for the I4 spec at once and passed bore/stroke correctly; consistent coordinates across parts (shafts at x=+-125 for 250 mm spacing); it read errors and changed approach, and stopped honestly with options. Its weak spots: static CVT with no bores (no joints), flat sheaves instead of cones, a redundant cut, windows kept open, motion study instead of move_mechanism.
 
 **NEXT: the user updates (Tools option 8), runs Tools option 3 (smoke test now has tilt-X, slanted, off-plane revolve and a V2 make_engine), and sends the zip. Check the 'tilt slot=' and 'move shift' lines, the engine steps and the motion-study member names.**
