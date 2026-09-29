@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 import pytest
 
-from sw_agent.assistant import Assistant, Toolbox
 from sw_mcp.core import connection
 from sw_mcp.core.errors import Code
 from sw_mcp.fakes.fake_modeler import make_modeling_app
@@ -18,7 +16,6 @@ from sw_mcp.tools.mechanism import connect_parts, make_engine
 from sw_mcp.tools.plan import build_part
 from sw_mcp.tools.project import list_project, make_assembly, plan_machine
 from tests.conftest import parse
-from tests.test_agent_chat import Scripted, config_with, make_router, text, tool_call
 
 SHAFT = {"steps": [{"op": "cylinder", "start": [0, 0, 0], "end": [0, 200, 0], "diameter": 30}]}
 PULLEY = {"steps": [{"op": "revolve", "axis": "y", "center": [0, 0, 0],
@@ -90,30 +87,3 @@ def test_summary_is_short_even_for_big_jobs(app):
     parse(plan_machine(project="Big", goal="many parts",
                        parts="\n".join(f"part{i}: a long description of part {i} " * 3 for i in range(60))))
     assert len(design.summary("Big")) <= design.SUMMARY_CHARS
-
-
-def test_every_model_gets_the_same_picture_after_a_switch(app):
-    """The free providers switch models mid-job: the second model must see what the first did."""
-    from sw_agent.llm import LLMError
-
-    groq = Scripted([tool_call("plan_machine", {"project": "CVT 2", "goal": "Belt CVT",
-                                                "parts": "input_shaft: d30\npulley: d150"}, "a1"),
-                     tool_call("build_part", {"plan": json.dumps(SHAFT), "save_as": "CVT 2/input_shaft"}, "a2"),
-                     LLMError("rate_limit", "429", 429, retry_after=60)])
-    gemini = Scripted([text("Next I build the pulley.")])
-    router, _ = make_router(config_with(("groq", "g", 90.0, 100), ("gemini", "m", 50.0, 100)),
-                            {"groq": groq, "gemini": gemini})
-
-    async def go():
-        async with Toolbox() as toolbox:
-            assistant = Assistant(router, toolbox)
-            await assistant.send("make a CVT")
-            return assistant
-
-    assistant = asyncio.run(go())
-    first_system = groq.requests[0]["messages"][0]["content"]
-    assert "CURRENT DESIGN of project" not in first_system  # nothing known yet
-    handed_over = gemini.requests[0]["messages"][0]["content"]
-    assert "CURRENT DESIGN of project" in handed_over and "input_shaft built" in handed_over
-    assert "Next: pulley" in handed_over and "do not start over" in handed_over
-    assert assistant.context()["project"] == "CVT 2"

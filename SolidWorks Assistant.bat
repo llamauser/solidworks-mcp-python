@@ -1,5 +1,6 @@
 @echo off
-rem Double-click to open the SolidWorks Assistant in your browser. Close this window to stop it.
+rem Double-click to open the SolidWorks Assistant in your browser (OpenCode runs in the background).
+rem Close this window to stop it.
 cd /d "%~dp0"
 if not exist ".venv\Scripts\python.exe" (
   echo The assistant is not installed yet.

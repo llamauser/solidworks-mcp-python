@@ -5,14 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sw-mcp"
 version = "0.1.0"
-description = "SolidWorks MCP server (pure Python, pywin32) designed for small and free LLMs"
+description = "SolidWorks MCP server (pure Python, pywin32) and a browser front end for OpenCode"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=2.2,<3",
     "pywin32>=306",
     "httpx>=0.27",
-    "keyring>=25",
     "rich>=13",
 ]
 
@@ -28,7 +27,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 sw_mcp = ["guide.md"]
-sw_agent = ["providers.toml", "web.html"]
+sw_agent = ["web.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

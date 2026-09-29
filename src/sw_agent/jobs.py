@@ -24,7 +24,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .config import config_dir
 
 ARG_CHARS = 20000       # a whole plan fits
 RESULT_CHARS = 3000
@@ -32,8 +31,16 @@ EXAMPLE_CHARS = 1600    # how much of a good plan is shown to the model as an ex
 TAGS = ("wrong size", "wrong shape", "missing part", "does not move", "parts misplaced", "too slow", "other")
 
 
+def app_dir() -> Path:
+    """The app folder: %APPDATA%/sw_agent (SW_AGENT_HOME overrides it, e.g. in tests)."""
+    import tempfile
+
+    base = os.environ.get("SW_AGENT_HOME") or os.path.join(os.environ.get("APPDATA") or tempfile.gettempdir(), "sw_agent")
+    return Path(base)
+
+
 def jobs_dir() -> Path:
-    return config_dir() / "jobs"
+    return app_dir() / "jobs"
 
 
 # ---------------------------------------------------------------- removing personal details

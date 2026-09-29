@@ -27,14 +27,13 @@
   header h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
   #model { color: var(--muted); font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
            white-space: nowrap; }
-  button, select { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
            border-radius: 8px; padding: 6px 12px; cursor: pointer; }
-  button:hover, select:hover { border-color: var(--muted); }
+  button:hover { border-color: var(--muted); }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   button.stop { border-color: var(--bad); color: var(--bad); display: none; }
   button.stop.on { display: inline-block; }
   button:disabled { opacity: .5; cursor: default; }
-  label.review { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
   main { flex: 1; overflow-y: auto; padding: 20px 16px; }
   #log { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
   .bubble { padding: 10px 14px; border-radius: 12px; max-width: 85%; overflow-wrap: anywhere; }
@@ -51,8 +50,12 @@
   .step summary::after { content: "  show"; color: var(--muted); opacity: .6; font-size: 12px; }
   .step details[open] summary::after { content: "  hide"; }
   .step .ok { color: var(--ok); } .step .bad { color: var(--bad); }
+  .step table { border-collapse: collapse; margin-top: 6px; background: var(--panel); }
+  .step td, .step th { padding: 3px 8px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+  .step .cut { color: var(--bad); } .step .add { color: var(--ok); }
   .note { align-self: center; font-size: 13px; color: var(--warn); }
   .info { align-self: center; font-size: 13px; color: var(--muted); }
+  .why { color: var(--muted); font-size: 13px; }
   .error { align-self: stretch; background: var(--accent-soft); border: 1px solid var(--accent); color: var(--text);
            padding: 10px 14px; border-radius: 10px; }
   #thinking { align-self: flex-start; color: var(--muted); font-size: 13px; display: none; }
@@ -61,45 +64,9 @@
   @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
   .card { align-self: stretch; background: var(--wait); border: 1px solid var(--wait-line); border-radius: 12px; padding: 12px 14px; }
   .card h3 { margin: 0 0 4px; font-size: 15px; }
-  .card .why { color: var(--muted); font-size: 13px; margin: 0 0 8px; white-space: pre-wrap; }
-  .card table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--panel); border-radius: 8px; }
-  .card td, .card th { padding: 5px 8px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
-  .card th { color: var(--muted); font-weight: 600; border-top: 0; }
-  .card .cut { color: var(--bad); } .card .add { color: var(--ok); }
-  .card textarea { width: 100%; min-height: 220px; font: 12.5px/1.45 Consolas, "Cascadia Mono", monospace; margin-top: 8px; }
   .card .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
-  .card .row input { flex: 1; min-width: 180px; font: inherit; padding: 6px 10px; border-radius: 8px;
-                     border: 1px solid var(--line); background: var(--panel); color: var(--text); }
-  .card .problem { color: var(--bad); font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
   .card.done { background: var(--panel); border-color: var(--line); opacity: .75; }
-  .card.done .row, .card.done textarea, .card.done .edit { display: none; }
-  #welcome { max-width: 900px; margin: 8vh auto 0; text-align: center; }
-  #welcome h2 { font-size: 22px; margin: 0 0 6px; }
-  #welcome p { color: var(--muted); margin: 0 0 18px; }
-  .examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; text-align: left; }
-  .examples button { text-align: left; padding: 12px 14px; line-height: 1.4; border-radius: 10px; }
-  footer { background: var(--panel); border-top: 1px solid var(--line); padding: 12px 16px; }
-  form { max-width: 900px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
-  textarea { flex: 1; resize: vertical; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
-             border-radius: 10px; padding: 10px 12px; }
-  #input { resize: none; min-height: 44px; max-height: 180px; }
-  textarea:focus, button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .hint { max-width: 900px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
-  .panel { position: fixed; right: 16px; top: 58px; width: min(460px, calc(100vw - 32px)); background: var(--panel);
-            border: 1px solid var(--line); border-radius: 12px; padding: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.18);
-            display: none; z-index: 5; max-height: calc(100vh - 80px); overflow-y: auto; }
-  .panel.open { display: block; }
-  #context { width: min(760px, calc(100vw - 32px)); }
-  #models table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  #models td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
-  #models td:last-child { text-align: right; }
-  .pick { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; font-size: 13px; }
-  .pick .line { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; align-items: center; }
-  .pick input[type=text], .pick input:not([type]) , #pickModel { flex: 1; min-width: 160px; font: inherit; padding: 6px 10px;
-         border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
-  .pick label.check { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0; }
-  #openaiBox { border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 8px; }
-  .msg { border-top: 1px solid var(--line); padding: 6px 0; font-size: 13px; }
+  .card.done .row { display: none; }
   .rate { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
           padding: 10px 14px; font-size: 13px; max-width: 85%; }
   .rate .stars button { font-size: 18px; padding: 2px 8px; margin-right: 2px; }
@@ -109,57 +76,43 @@
   .rate .tags input { margin-right: 4px; }
   .rate input.comment { width: 100%; font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
                         background: var(--bg); color: var(--text); margin-bottom: 8px; }
-  .msg b { text-transform: uppercase; font-size: 11px; color: var(--muted); letter-spacing: .04em; }
+  #welcome { max-width: 900px; margin: 8vh auto 0; text-align: center; }
+  #welcome h2 { font-size: 22px; margin: 0 0 6px; }
+  #welcome p { color: var(--muted); margin: 0 0 18px; }
+  .examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; text-align: left; }
+  .examples button { text-align: left; padding: 12px 14px; line-height: 1.4; border-radius: 10px; }
+  footer { background: var(--panel); border-top: 1px solid var(--line); padding: 12px 16px; }
+  form { max-width: 900px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  #input { flex: 1; resize: none; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+           border-radius: 10px; padding: 10px 12px; min-height: 44px; max-height: 180px; }
+  #input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { max-width: 900px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
+  .panel { position: fixed; right: 16px; top: 58px; width: min(460px, calc(100vw - 32px)); background: var(--panel);
+           border: 1px solid var(--line); border-radius: 12px; padding: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.18);
+           display: none; z-index: 5; max-height: calc(100vh - 80px); overflow-y: auto; }
+  .panel.open { display: block; }
+  #models table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #models td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
+  #models td:last-child { text-align: right; }
   @media (max-width: 560px) { .bubble { max-width: 100%; } header { gap: 8px; } }
 </style>
 </head>
 <body>
 <header>
   <h1><span class="dot" aria-hidden="true"></span>SolidWorks Assistant</h1>
-  <div id="model" aria-live="polite">Starting...</div>
-  <label class="review" for="reviewSel">Review
-    <select id="reviewSel" title="Should I show you each plan before building it?">
-      <option value="off">Off: just build</option>
-      <option value="builds">Show plans before building</option>
-      <option value="all">Ask before every change</option>
-    </select>
-  </label>
+  <div id="model" aria-live="polite">Starting OpenCode...</div>
   <button id="stopBtn" class="stop" type="button">Stop</button>
-  <button id="contextBtn" type="button">Context</button>
   <button id="shareBtn" type="button" title="Pack your build records into a zip to send to the developer">Share builds</button>
   <button id="modelsBtn" type="button">Models</button>
   <button id="newBtn" type="button">New conversation</button>
 </header>
 <div id="models" class="panel" role="dialog" aria-label="AI models">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-    <strong>AI models (tried top to bottom)</strong>
-    <button type="button" id="autoBtn">Automatic</button>
+    <strong>AI models in OpenCode</strong>
+    <button type="button" id="autoBtn" title="The model set in the SolidWorks agent">Agent's model</button>
   </div>
+  <div class="why">To add providers (OpenRouter, OpenAI, Gemini ...): Tools menu, option 5.</div>
   <table id="modelsTable"></table>
-  <div class="pick">
-    <strong>Choose a model yourself</strong>
-    <div class="why">Any model the provider offers, even one the setup did not test.</div>
-    <div class="line">
-      <select id="pickProvider" aria-label="Provider"></select>
-      <input id="pickModel" list="pickList" placeholder="model name, e.g. gpt-5-mini" aria-label="Model" autocomplete="off">
-      <datalist id="pickList"></datalist>
-    </div>
-    <label class="check"><input type="checkbox" id="pickOnly"> Only this model (never switch to another)</label>
-    <div class="line"><button type="button" class="primary" id="pickBtn">Use this model</button>
-      <span id="pickNote" class="why"></span></div>
-    <div id="openaiBox" hidden>
-      <strong>OpenAI extras</strong> <span class="why">(only OpenAI models get these)</span>
-      <label class="check"><input type="checkbox" id="oaInternet"> Internet: search the web and read pages</label>
-      <label class="check"><input type="checkbox" id="oaTerminal"> Terminal commands: PowerShell on this PC, each command waits for your OK</label>
-    </div>
-  </div>
-</div>
-<div id="context" class="panel" role="dialog" aria-label="What the AI sees">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-    <strong>What the AI receives with the next request</strong>
-    <button type="button" id="contextClose">Close</button>
-  </div>
-  <div id="contextBody"></div>
 </div>
 <main id="scroll">
   <div id="welcome">
@@ -180,13 +133,13 @@
     <textarea id="input" rows="1" placeholder="Describe what you want..." autocomplete="off"></textarea>
     <button class="primary" id="sendBtn" type="submit">Send</button>
   </form>
-  <div class="hint">Enter to send, Shift+Enter for a new line. Everything runs on this PC; only your messages go to the AI provider.</div>
+  <div class="hint">Enter to send, Shift+Enter for a new line. OpenCode runs on this PC; only your messages go to the AI provider.</div>
 </footer>
 <script>
 const TOKEN = "__TOKEN__";
 const $ = (id) => document.getElementById(id);
 const log = $("log"), input = $("input"), sendBtn = $("sendBtn"), scroller = $("scroll");
-let lastId = 0, busy = false, thinking = null, pendingId = null;
+let lastId = 0, busy = false, thinking = null;
 
 const TOOL_LABELS = {
   build_part: "Building the part", get_status: "Checking SolidWorks", open_document: "Opening the file",
@@ -195,9 +148,9 @@ const TOOL_LABELS = {
   get_model_summary: "Checking the result", undo_last_feature: "Undoing the last step",
   make_engine: "Building the engine (a few minutes)", connect_parts: "Connecting the parts",
   move_mechanism: "Turning the mechanism", make_motion_study: "Making the motion study",
-  manage_documents: "Managing the windows",
-  web_search: "Searching the internet", fetch_page: "Reading a web page", run_command: "Running a command on this PC",
+  manage_documents: "Managing the windows", plan_machine: "Writing the machine plan",
 };
+const RATE_TAGS = ["wrong size", "wrong shape", "missing part", "does not move", "parts misplaced", "too slow", "other"];
 
 async function api(path, body) {
   const opts = { headers: { "X-Token": TOKEN, "Content-Type": "application/json" } };
@@ -235,8 +188,7 @@ function pretty(value) {
   return JSON.stringify(value, null, 2);
 }
 
-function argsForEditing(args) {
-  // A build_part plan arrives as a JSON string; show it as a readable object.
+function readableArgs(args) {
   const copy = Object.assign({}, args);
   if (typeof copy.plan === "string") { try { copy.plan = JSON.parse(copy.plan); } catch (e) { /* keep text */ } }
   return JSON.stringify(copy, null, 2);
@@ -258,78 +210,45 @@ function setThinking(on) {
 
 function previewHtml(p) {
   if (!p) return "";
-  if (p.ok === false) {
-    return `<div class="problem">&#10007; ${esc(p.message || "")}${p.fix ? "\n" + esc(p.fix) : ""}</div>`;
-  }
+  if (p.ok === false) return `<div class="why">Plan check: ${esc(p.message || "")}</div>`;
   if (p.steps) {
-    const rows = p.steps.map((s) => `<tr><td>${s.n}</td><td class="${s.mode === "cut" ? "cut" : "add"}">` +
-      `${esc(s.mode || "")}</td><td>${esc(s.what)}</td></tr>`).join("");
-    const size = p.expect_size ? `<div class="why">Expected size: ${p.expect_size.join(" x ")} mm</div>` : "";
-    return `<table><tr><th>#</th><th></th><th>Step</th></tr>${rows}</table>${size}`;
-  }
-  if (p.command !== undefined) {
-    return `<pre>${esc(p.command)}</pre><div class="why">Runs in ${esc(p.runs_in || "")}</div>` +
-      `<div class="problem">${esc(p.warning || "")}</div>`;
+    return "<table>" + p.steps.map((s) => `<tr><td>${s.n}</td><td class="${s.mode === "cut" ? "cut" : "add"}">` +
+      `${esc(s.mode || "")}</td><td>${esc(s.what)}</td></tr>`).join("") + "</table>";
   }
   if (p.parts) {
-    return `<table>
-      <tr><th>Engine</th><td>${esc(p.layout)} ${p.cylinders} cylinders${p.bank_angle ? ", " + p.bank_angle + " degree V" : ""}</td></tr>
-      <tr><th>Bore x stroke</th><td>${p.bore_mm} x ${p.stroke_mm} mm, rod ${p.rod_length_mm} mm, ${p.displacement_cc} cc</td></tr>
-      <tr><th>Size</th><td>block ${p.block_length_mm} mm long, deck ${p.deck_height_mm} mm above the crankshaft</td></tr>
-      <tr><th>Parts</th><td>${p.parts.map(esc).join(", ")}</td></tr></table>`;
+    return `<div class="why">${esc(p.layout)} ${p.cylinders} cylinders, bore ${p.bore_mm} x stroke ${p.stroke_mm} mm, ` +
+      `${p.displacement_cc} cc; parts: ${p.parts.map(esc).join(", ")}</div>`;
   }
   return "";
 }
 
-function renderReview(e) {
-  const d = e.data || {};
-  const card = add("card", `
-    <h3>&#9208; Waiting for you: ${esc(TOOL_LABELS[d.name] || d.name)}</h3>
-    ${d.reason ? `<p class="why">${esc(d.reason)}</p>` : ""}
-    <div class="prev">${previewHtml(d.preview)}</div>
-    <details class="edit"><summary>Edit the ${d.name === "build_part" ? "plan" : "settings"}</summary>
-      <textarea spellcheck="false">${esc(argsForEditing(d.args || {}))}</textarea>
-      <div class="row"><button type="button" class="check">Check</button>
-        <span class="why">Checks your changes without touching SolidWorks.</span></div>
-    </details>
-    <div class="row">
-      <button type="button" class="primary run">Run</button>
-      <input type="text" class="note" placeholder="Or tell the AI what to change instead...">
-      <button type="button" class="skip">Send note / skip</button>
-      <button type="button" class="stopit">Stop</button>
-    </div>`);
-  card.dataset.id = d.id;
-  const area = card.querySelector("textarea");
-  const edited = () => {
-    try { return JSON.parse(area.value); } catch (err) { return undefined; }
-  };
-  const decide = async (action) => {
-    const body = { id: d.id, action };
-    if (action === "run") {
-      const args = edited();
-      if (args === undefined) { card.querySelector(".prev").innerHTML = previewHtml({ ok: false, message: "The edited text is not valid JSON." }); return; }
-      body.args = args;
-    }
-    if (action === "skip") body.note = card.querySelector(".note").value;
-    const { status, data } = await api("/api/review", body);
-    if (status === 200) closeCard(card, action === "run" ? "run" : action === "skip" ? "skipped" : "stopped");
-    else add("error", esc(data.error || "Could not send that."));
-  };
-  card.querySelector(".run").addEventListener("click", () => decide("run"));
-  card.querySelector(".skip").addEventListener("click", () => decide("skip"));
-  card.querySelector(".stopit").addEventListener("click", () => decide("stop"));
-  card.querySelector(".note").addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); decide("skip"); } });
-  card.querySelector(".check").addEventListener("click", async () => {
-    const args = edited();
-    const prev = card.querySelector(".prev");
-    if (args === undefined) { prev.innerHTML = previewHtml({ ok: false, message: "The edited text is not valid JSON." }); return; }
-    const { data } = await api("/api/preview", { name: d.name, args });
-    prev.innerHTML = previewHtml(data) || '<div class="why">&#10003; Looks valid.</div>';
-  });
-  setThinking(false);
+function stepHtml(icon, label, detailHtml) {
+  if (!detailHtml) return `${icon} ${label}`;
+  return `<details><summary>${icon} ${label}</summary>${detailHtml}</details>`;
 }
 
-const RATE_TAGS = ["wrong size", "wrong shape", "missing part", "does not move", "parts misplaced", "too slow", "other"];
+function renderPermission(e) {
+  const d = e.data || {};
+  const meta = d.metadata && Object.keys(d.metadata).length ? `<pre>${esc(pretty(d.metadata))}</pre>` : "";
+  const card = add("card", `
+    <h3>&#9208; ${esc(e.text)}</h3>${meta}
+    <div class="row">
+      <button type="button" class="primary once">Allow once</button>
+      <button type="button" class="always">Always allow</button>
+      <button type="button" class="reject">Refuse</button>
+    </div>`);
+  const answer = async (reply) => {
+    const { status } = await api("/api/permission", { id: d.id, reply });
+    if (status === 200) {
+      card.classList.add("done");
+      card.querySelector("h3").innerHTML = esc(e.text) + (reply === "reject" ? " (refused)" : " (allowed)");
+    }
+  };
+  card.querySelector(".once").addEventListener("click", () => answer("once"));
+  card.querySelector(".always").addEventListener("click", () => answer("always"));
+  card.querySelector(".reject").addEventListener("click", () => answer("reject"));
+  setThinking(false);
+}
 
 function renderRating(e) {
   const d = e.data || {};
@@ -353,52 +272,31 @@ function renderRating(e) {
   });
 }
 
-async function shareBuilds() {
-  const { data } = await api("/api/share", {});
-  if (data.ok) add("info", `Packed ${data.jobs} build record(s) into ${esc(data.path)}. Send that file to the developer.`);
-  else add("error", "Could not pack the build records.");
-}
-
-function closeCard(card, how) {
-  if (card.classList.contains("done")) return;
-  card.classList.add("done");
-  const h = card.querySelector("h3");
-  if (h) h.innerHTML = h.innerHTML.replace("Waiting for you:", how ? `${how}:` : "");
-}
-
-function closeAllCards() { log.querySelectorAll(".card:not(.done)").forEach((c) => closeCard(c, "")); }
-
-function stepHtml(icon, label, detail) {
-  if (!detail) return `${icon} ${label}`;
-  return `<details><summary>${icon} ${label}</summary><pre>${esc(detail)}</pre></details>`;
-}
-
 function render(e) {
   switch (e.kind) {
     case "user": add("bubble user", esc(e.text)); break;
     case "thinking": setThinking(true); break;
-    case "review": renderReview(e); break;
     case "tool": {
-      closeAllCards(); setThinking(false);
-      const args = e.data && e.data.args;
-      const detail = args && Object.keys(args).length ? argsForEditing(args) : "";
-      add("step", stepHtml("&#8594;", esc(TOOL_LABELS[e.text] || e.text) + "...", detail));
+      setThinking(false);
+      const d = e.data || {};
+      const args = d.args && Object.keys(d.args).length ? `<pre>${esc(readableArgs(d.args))}</pre>` : "";
+      add("step", stepHtml("&#8594;", esc(TOOL_LABELS[e.text] || e.text) + "...", previewHtml(d.preview) + args));
       break;
     }
     case "result": {
-      closeAllCards();
       const bad = e.text.startsWith("problem");
-      const out = e.data && e.data.output ? pretty(e.data.output) : "";
+      const out = e.data && e.data.output ? `<pre>${esc(pretty(e.data.output))}</pre>` : "";
       add("step", stepHtml(`<span class="${bad ? "bad" : "ok"}">${bad ? "&#10007;" : "&#10003;"}</span>`,
         esc(e.text.replace(/^(done: |problem: )/, "")), out));
       break;
     }
-    case "model": add("note", esc(e.text)); break;
+    case "permission": renderPermission(e); break;
+    case "model": $("model").textContent = e.text; break;
     case "error": setThinking(false); add("error", esc(e.text)); break;
-    case "reply": closeAllCards(); setThinking(false); add("bubble reply", markdown(e.text)); break;
+    case "reply": setThinking(false); add("bubble reply", markdown(e.text)); break;
     case "info": add("info", esc(e.text)); break;
     case "job": renderRating(e); break;
-    case "idle": closeAllCards(); setThinking(false); setBusy(false); refreshStatus(); break;
+    case "idle": setThinking(false); setBusy(false); break;
   }
 }
 
@@ -424,86 +322,15 @@ async function poll() {
 async function refreshStatus() {
   const { data } = await api("/api/status");
   const models = data.models || [];
-  const ready = models.find((m) => ["only this one", "chosen", "ready"].includes(m.state));
-  $("model").textContent = ready ? `Model: ${ready.provider} / ${ready.model}` : (models.length ? "All models are busy right now" : "No AI model connected");
-  $("modelsTable").innerHTML = models.map((m) =>
-    `<tr><td>${m.n}</td><td>${esc(m.provider)}<br><small>${esc(m.model)}</small></td><td>${esc(m.state)}</td>` +
-    `<td><button type="button" data-n="${m.n}">Use first</button></td></tr>`).join("") ||
-    "<tr><td>No models yet. Run the installer or 'sw-agent setup'.</td></tr>";
-  if (data.review) $("reviewSel").value = data.review;
-  return data;
-}
-
-function messageHtml(m) {
-  let body = "";
-  if (m.content) body += `<pre>${esc(m.content)}</pre>`;
-  for (const c of m.tool_calls || []) {
-    body += `<pre>call ${esc(c.function.name)} ${esc(pretty(c.function.arguments))}</pre>`;
-  }
-  const who = m.role === "tool" ? "tool result" : m.role;
-  return `<div class="msg"><b>${esc(who)}</b>${body}</div>`;
-}
-
-async function loadProviders() {
-  const { data } = await api("/api/providers");
-  const list = data.providers || [];
-  const manual = data.manual || {};
-  $("pickProvider").innerHTML = list.map((p) =>
-    `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("") || "<option value=''>No provider connected</option>";
-  if (manual.provider) $("pickProvider").value = manual.provider;
-  $("pickModel").value = manual.model || "";
-  $("pickOnly").checked = !!manual.only;
-  const tools = data.openai_tools || {};
-  $("openaiBox").hidden = !list.some((p) => p.id === "openai");
-  $("oaInternet").checked = !!tools.internet;
-  $("oaTerminal").checked = !!tools.terminal;
-  loadModels();
-}
-
-async function loadModels() {
-  const pid = $("pickProvider").value;
-  $("pickList").innerHTML = "";
-  if (!pid) return;
-  $("pickNote").textContent = "Asking the provider for its models...";
-  const { data } = await api(`/api/models?provider=${encodeURIComponent(pid)}`);
-  if (!data.ok) { $("pickNote").textContent = data.error || "Could not list the models."; return; }
-  const tested = new Set(data.tested || []);
-  $("pickList").innerHTML = data.models.map((m) =>
-    `<option value="${esc(m)}">${tested.has(m) ? "tested, works with tools" : ""}</option>`).join("");
-  $("pickNote").textContent = `${data.models.length} models. Type or pick one.`;
-}
-
-async function pickModel() {
-  const body = { action: "pick", provider: $("pickProvider").value, model: $("pickModel").value.trim(),
-                 only: $("pickOnly").checked };
-  const { status, data } = await api("/api/control", body);
-  $("pickNote").textContent = status === 200 ? "Saved. It is used from the next message on." : (data.error || "Could not use that.");
-  refreshStatus();
-}
-
-async function saveOpenaiTools() {
-  if ($("oaTerminal").checked && !confirm("Allow OpenAI models to run PowerShell commands on this PC? " +
-      "Every command is shown to you first and only runs if you press Run.")) {
-    $("oaTerminal").checked = false;
-  }
-  await api("/api/control", { action: "openai_tools", internet: $("oaInternet").checked, terminal: $("oaTerminal").checked });
-}
-
-async function showContext() {
-  const { data } = await api("/api/context");
-  const msgs = data.messages || [];
-  const system = msgs.length && msgs[0].role === "system" ? msgs[0] : null;
-  const rest = system ? msgs.slice(1) : msgs;
-  $("contextBody").innerHTML = `
-    <div class="why">About ${data.estimated_tokens} tokens per request (tool definitions ${data.tool_definitions_chars} characters)
-      ${data.model ? "&middot; last model: " + esc(data.model) : ""}. Older steps are shortened to save your free quota.</div>
-    ${data.project ? `<div class="why">Project: <b>${esc(data.project)}</b>. Its shared design (checklist, parts, joints) is at the end of the instructions, so every model sees the same picture.</div>` : ""}
-    <details><summary>Instructions (system prompt)</summary>${system ? `<pre>${esc(system.content)}</pre>` : ""}</details>
-    <details><summary>Tools offered (${(data.tools || []).length})</summary><pre>${esc((data.tools || []).join(", "))}</pre></details>
-    <h4 style="margin:10px 0 4px">Conversation as the AI sees it (${rest.length} messages)</h4>
-    ${rest.map(messageHtml).join("") || '<div class="why">Nothing yet.</div>'}`;
-  $("context").classList.add("open");
-  $("models").classList.remove("open");
+  const chosen = data.chosen;
+  if (chosen) $("model").textContent = `Model: ${chosen.providerID}/${chosen.modelID}`;
+  else if (data.last_model) $("model").textContent = `Model: ${data.last_model}`;
+  else $("model").textContent = models.length ? "Ready" : "No AI model found in OpenCode";
+  $("modelsTable").innerHTML = models.map((m) => {
+    const on = chosen && chosen.providerID === m.providerID && chosen.modelID === m.modelID;
+    return `<tr><td>${esc(m.provider)}<br><small>${esc(m.modelID)}</small></td><td>${on ? "in use" : ""}</td>` +
+      `<td><button type="button" data-p="${esc(m.providerID)}" data-m="${esc(m.modelID)}">Use</button></td></tr>`;
+  }).join("") || "<tr><td>No models listed. Connect a provider: Tools menu, option 5.</td></tr>";
 }
 
 async function send(text) {
@@ -512,10 +339,14 @@ async function send(text) {
   setBusy(true);
   input.value = ""; input.style.height = "";
   const { status } = await api("/api/send", { text });
-  if (status !== 200) { setBusy(false); add("error", status === 409 ? "Still working on the last request." : "Could not send that."); }
+  if (status !== 200) { setBusy(false); if (status === 409) add("error", "Still working on the last request."); }
 }
 
-function savedReview() { try { return localStorage.getItem("review") || ""; } catch (e) { return ""; } }
+async function shareBuilds() {
+  const { data } = await api("/api/share", {});
+  if (data.ok) add("info", `Packed ${data.jobs} build record(s) into ${esc(data.path)}. Send that file to the developer.`);
+  else add("error", "Could not pack the build records.");
+}
 
 $("form").addEventListener("submit", (ev) => { ev.preventDefault(); send(input.value); });
 input.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); send(input.value); } });
@@ -523,41 +354,18 @@ input.addEventListener("input", () => { input.style.height = ""; input.style.hei
 document.querySelectorAll(".examples button").forEach((b) => b.addEventListener("click", () => send(b.textContent)));
 $("newBtn").addEventListener("click", () => api("/api/control", { action: "new" }));
 $("stopBtn").addEventListener("click", () => api("/api/control", { action: "stop" }));
-$("reviewSel").addEventListener("change", async () => {
-  const mode = $("reviewSel").value;
-  try { localStorage.setItem("review", mode); } catch (e) { /* private window */ }
-  await api("/api/control", { action: "review", mode });
-});
-$("contextBtn").addEventListener("click", showContext);
 $("shareBtn").addEventListener("click", shareBuilds);
-$("contextClose").addEventListener("click", () => $("context").classList.remove("open"));
-$("modelsBtn").addEventListener("click", () => {
-  $("models").classList.toggle("open"); $("context").classList.remove("open"); refreshStatus();
-  if ($("models").classList.contains("open")) loadProviders();
-});
-$("pickProvider").addEventListener("change", () => { $("pickModel").value = ""; loadModels(); });
-$("pickBtn").addEventListener("click", pickModel);
-$("oaInternet").addEventListener("change", saveOpenaiTools);
-$("oaTerminal").addEventListener("change", saveOpenaiTools);
+$("modelsBtn").addEventListener("click", () => { $("models").classList.toggle("open"); refreshStatus(); });
 $("autoBtn").addEventListener("click", async () => { await api("/api/control", { action: "auto" }); refreshStatus(); });
 $("modelsTable").addEventListener("click", async (ev) => {
-  const n = ev.target.dataset && ev.target.dataset.n;
-  if (n) { await api("/api/control", { action: "use", n: +n }); refreshStatus(); }
+  const b = ev.target.closest("button");
+  if (b && b.dataset.p) { await api("/api/control", { action: "use", providerID: b.dataset.p, modelID: b.dataset.m }); refreshStatus(); }
 });
-document.addEventListener("keydown", (ev) => {
-  if (ev.key === "Escape") { $("models").classList.remove("open"); $("context").classList.remove("open"); }
-});
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") $("models").classList.remove("open"); });
 
-(async () => {
-  const status = await refreshStatus();
-  const wanted = savedReview();
-  if (wanted && status.review !== wanted && !status.busy) {
-    await api("/api/control", { action: "review", mode: wanted });
-    $("reviewSel").value = wanted;
-  }
-  poll();
-  input.focus();
-})();
+refreshStatus();
+poll();
+input.focus();
 </script>
 </body>
 </html>

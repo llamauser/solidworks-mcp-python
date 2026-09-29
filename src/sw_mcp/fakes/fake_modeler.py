@@ -872,7 +872,7 @@ class FakeAssembly:
 def make_modeling_app():
     """A fake SolidWorks application whose NewDocument creates FakePart documents.
 
-    Used by the tests and by `sw-agent bench` (models are scored without real SolidWorks).
+    Used by the tests (no real SolidWorks needed).
     """
     from .fake_sw import FakeApp
 

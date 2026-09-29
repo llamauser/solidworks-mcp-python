@@ -1,8 +1,8 @@
 # Getting started: SolidWorks Assistant
 
 The SolidWorks Assistant builds and edits SolidWorks parts from plain-language descriptions,
-for example "a 100 x 60 x 12 mm plate with four 8 mm holes". It uses free AI models on the
-internet; your SolidWorks files stay on your PC.
+for example "a 100 x 60 x 12 mm plate with four 8 mm holes". It runs on **OpenCode**, which
+talks to AI models on the internet (free ones included); your SolidWorks files stay on your PC.
 
 You don't need to know how to code.
 
@@ -10,7 +10,7 @@ You don't need to know how to code.
 
 - A Windows PC with SolidWorks (2020 or newer).
 - An internet connection.
-- About 15 minutes for the first setup.
+- About 10 minutes for the first setup.
 
 ## 1. Get the files
 
@@ -27,38 +27,27 @@ Open the folder and double-click **Install SolidWorks Assistant.bat**.
 
 A black window opens and:
 1. installs Python if it is missing (it asks first);
-2. installs the assistant;
-3. starts the **AI provider setup**, described next;
-4. offers two desktop shortcuts: **SolidWorks Assistant** (to use it) and
+2. installs the SolidWorks tools;
+3. installs **OpenCode**, or updates it to the newest version;
+4. sets OpenCode up for SolidWorks (the "solidworks" agent);
+5. asks whether to connect another AI provider (you can say no: OpenCode's own free models
+   work without any account or key);
+6. offers two desktop shortcuts: **SolidWorks Assistant** (to use it) and
    **SolidWorks Assistant - Tools** (everything else, see below).
 
-### Connecting AI providers
+### More AI models (optional)
 
-The assistant needs at least one AI provider. The providers below have free tiers. For each one
-the setup window shows:
-
-- what you get for free,
-- what happens to your data. **Read this.** Some free services may use what you type to train
-  their AI. If your designs are confidential, choose the providers marked "does not train on
-  your data", or run a model on your own PC (LM Studio or Ollama).
-
-Press **Enter** to set a provider up, or **s** to skip it. When you set one up:
-1. A web page opens. Sign in (or create a free account) and create an **API key**. That is
-   just a long password for programs; copy it.
-2. Go back to the black window and paste the key (right-click, or Ctrl+V). It stays hidden.
-3. The key is tested and saved safely in Windows Credential Manager.
-
-Setting up **two or three** providers is best: when one reaches its daily free limit, the
-assistant switches to another automatically. **OpenRouter** and **Groq** are good first choices.
-
-You can add or change providers later: open the folder, then double-click
-**Install SolidWorks Assistant.bat** again.
+OpenCode's free models are enough to start. If you have an account with another provider
+(OpenRouter, OpenAI, Google Gemini, Groq ...), open the Tools menu and choose **5**: pick the
+provider in the list and paste its key. OpenCode keeps the key. Some free services may use
+what you type to train their AI; if your designs are confidential, check the provider's terms.
 
 ## 3. Use it
 
 1. Open SolidWorks.
 2. Double-click **SolidWorks Assistant** on your desktop (or in the folder).
-3. A page opens in your browser. Type what you want and press **Enter**.
+3. OpenCode starts in the background and a page opens in your browser. Type what you want and
+   press **Enter**.
 
 While it works, you see each step ("Building the part...", "Saving..."), then a short answer.
 
@@ -76,27 +65,16 @@ While it works, you see each step ("Building the part...", "Saving..."), then a 
 
 If the result is not right, just say what to change: "the holes should be 8 mm, not 6".
 
-### Buttons on the page
+### On the page
 
+- **Steps:** every step line can be opened to see what was sent to SolidWorks (a part's plan is
+  shown as numbered steps) and what came back.
+- **Questions from OpenCode:** before something outside SolidWorks (for example a command on your
+  PC) OpenCode asks first. Choose **Allow once**, **Always allow** or **Refuse**.
+- **Stop:** stops the current request.
+- **Models:** the AI models OpenCode can use. **Use** picks one for your next messages;
+  **Agent's model** goes back to the default.
 - **New conversation:** start fresh. It also uses less of your free quota.
-- **Models:** see which AI models are connected. Choose one to try first, or go back to
-  automatic. Under **Choose a model yourself** pick a provider and any model it offers (the list
-  comes live from the provider, or type a name such as `gpt-5-mini`). Tick **Only this model** to
-  never switch to another one. The choice is kept for next time.
-- **OpenAI extras** (in the Models panel, only when OpenAI is connected; only OpenAI models get
-  them):
-  - **Internet:** the model can search the web (OpenAI's own search) and read pages, e.g. to look
-    up standard bolt or bearing sizes.
-  - **Terminal commands:** the model can run PowerShell commands on this PC, e.g. to zip a project
-    folder. **Every command is shown to you first** and runs only when you press Run.
-- **Review:** "Show plans before building" makes the assistant stop before each part or engine:
-  you see the plan as steps, can edit it (Check tests your edit without SolidWorks), run it,
-  send a note instead ("make the holes 8 mm"), or stop. "Ask before every change" stops before
-  anything that changes SolidWorks.
-- **Stop:** stops after the current step (a SolidWorks operation is never cut off halfway).
-- **Context:** shows exactly what the AI receives: its instructions, the tools, and the
-  conversation (older steps are shortened to save your free quota).
-- Every step line can be opened to see what exactly was sent to SolidWorks and what came back.
 - **Rating:** after a build a small card asks "How did it turn out?" (1-5 stars, quick tags,
   a comment). Every request is recorded on this PC (what you asked, the steps, which AI model did
   them, the result and a picture). Nothing is sent anywhere by itself.
@@ -105,8 +83,11 @@ If the result is not right, just say what to change: "the holes should be 8 mm, 
   no file paths and no user names. Builds you rated 4 or 5 stars are also shown to the AI as
   examples when you ask for something similar.
 
-In the terminal version the same things are commands: `/use openai gpt-5-mini` (add `only`),
-`/models openai`, `/internet on`, `/terminal on`, `/review builds`, `/context`.
+### In a terminal instead
+
+Tools menu option **2** opens OpenCode itself in the window, already set to the SolidWorks agent.
+Type the same requests there. (It is OpenCode's normal interface: `/models` changes the model,
+`/new` starts a new conversation.)
 
 ## The Tools menu
 
@@ -115,12 +96,14 @@ menu: type a number and press Enter. No commands to remember.
 
 | Number | What it does |
 |--------|--------------|
-| 1 / 2 | Start the assistant in your browser, or in the menu window |
+| 1 | Start the assistant in your browser |
+| 2 | Start OpenCode in the menu window, with the SolidWorks agent |
 | 3 | **Check SolidWorks works.** It builds a few test parts in a temp folder (your files are not touched), then packs the logs. Takes 1 to 3 minutes. |
 | 4 | **Collect all logs.** It makes one zip on your Desktop, opens a window with it selected, and copies its path. Drag that zip into the chat with the developer. |
-| 5 / 6 | Connect or change AI providers, or see which ones are connected |
-| 7 | Score the AI models on SolidWorks tasks (uses some free requests) |
-| 8 | Update to the latest version (needs Git; otherwise download the ZIP again) |
+| 5 | Connect an AI provider in OpenCode (optional) |
+| 6 | Show OpenCode's version, the connected providers and the models |
+| 7 | Pack your build records and ratings to share |
+| 8 | **Update everything:** the assistant and OpenCode (needs Git; otherwise download the ZIP again and run the installer) |
 
 If the assistant is not installed yet, the menu installs it first.
 
@@ -128,16 +111,16 @@ If the assistant is not installed yet, the menu installs it first.
 
 | You see | What to do |
 |---------|-----------|
-| "No AI model is connected yet" | Double-click **Install SolidWorks Assistant.bat** and connect at least one provider. |
-| "All connected models are busy or rate-limited" | The free limits are used up for now. Wait the time it says, or connect another provider. |
+| "OpenCode is not installed" | Double-click **Install SolidWorks Assistant.bat**. |
+| A model says "rate limited" or "no credits" | That model's limit is used up for now. Pick another under **Models**, or wait. |
 | "SolidWorks is starting" | Wait 30 seconds and ask again. |
 | "SolidWorks is busy" or no answer | Look at SolidWorks: close any open dialog box, then try again. |
 | The page says it lost the connection | The black window was closed. Double-click **SolidWorks Assistant** again. |
 | Anything else | Close everything and start again. If it keeps happening, open the **Tools** menu, choose **4** (collect logs) and send the zip to the project owner. |
 
 Every conversation is recorded on this PC (in `%LOCALAPPDATA%\sw_mcp`) so problems can be
-investigated. Tools menu option **4** (or **Collect logs.bat**) packs them into one zip. It never contains
-your API keys.
+investigated. Tools menu option **4** (or **Collect logs.bat**) packs them, with OpenCode's own
+logs, into one zip. It never contains your API keys.
 
 ## Good to know
 

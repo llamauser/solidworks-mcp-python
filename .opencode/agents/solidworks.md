@@ -1,13 +1,13 @@
 ---
 description: Builds, inspects and edits SolidWorks parts using only the solidworks tools
 mode: primary
-model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
+model: opencode/nemotron-3-ultra-free
 temperature: 0.1
 steps: 40
 permission:
-  bash: deny
+  bash: ask
   edit: deny
-  read: deny
+  read: ask
   glob: deny
   grep: deny
   list: deny

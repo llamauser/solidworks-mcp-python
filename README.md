@@ -1,18 +1,19 @@
-# sw_mcp: SolidWorks MCP server for small models
+# SolidWorks Assistant: SolidWorks tools for OpenCode
 
-A pure-Python MCP server that lets an LLM inspect and edit the model open in SolidWorks.
-It uses pywin32 COM and the official `mcp` SDK (v2); there is no C#, Node.js or VBA.
-The tools are built for small and free models: few tools, flat arguments, units in the
-argument names, and JSON answers that always carry a `fix` hint when something goes wrong.
+A pure-Python MCP server that lets an AI inspect, build and edit models in SolidWorks, run
+through **OpenCode**. The server uses pywin32 COM and the official `mcp` SDK (v2); there is no
+C#, Node.js or VBA. The tools are built for small and free models: few tools, flat arguments,
+units in the argument names, and JSON answers that always carry a `fix` hint when something
+goes wrong.
 
 It works with any recent SolidWorks (about 2020 onward) and with localized (non-English)
-installs. It comes with `sw-agent`, which connects free AI providers (setup wizard) and
-links the tools to OpenCode, VS Code Copilot, Gemini CLI, Claude Desktop and other MCP apps.
+installs. OpenCode runs the conversation and the AI models; this project adds the SolidWorks
+tools, the `solidworks` agent, and a browser page for people who do not want a terminal.
 
 > **SolidWorks users (no coding needed):** read [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
-> In short: double-click **Install SolidWorks Assistant.bat**, connect a free AI provider when
-> asked, then double-click **SolidWorks Assistant** to open it in your browser. Everything else
-> (checking SolidWorks, collecting logs, providers, updates) is in **SolidWorks Assistant - Tools.bat**.
+> In short: double-click **Install SolidWorks Assistant.bat**, then double-click
+> **SolidWorks Assistant** to open it in your browser. Everything else (OpenCode in a terminal,
+> checking SolidWorks, collecting logs, AI providers, updates) is in **SolidWorks Assistant - Tools.bat**.
 
 ## Setup on the SolidWorks PC
 
@@ -21,10 +22,12 @@ links the tools to OpenCode, VS Code Copilot, Gemini CLI, Claude Desktop and oth
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\install.ps1
    ```
-   It installs Python if needed (via winget, after asking), creates `.venv`, installs everything,
-   runs the unit tests, starts the **AI provider wizard** (below) and offers a desktop shortcut.
-   It is safe to run again after every `git pull`. (`Install SolidWorks Assistant.bat` does the
-   same with a double-click; `-Quiet` skips all questions.)
+   It installs Python if needed (via winget, after asking), creates `.venv` with the SolidWorks
+   tools, **installs OpenCode or updates it to the latest release** (the official Windows build
+   into `%USERPROFILE%\.opencode\bin`, or `npm` if OpenCode came from npm), writes the
+   `solidworks` agent file, runs the unit tests and offers desktop shortcuts. It is safe to run
+   again; `Install SolidWorks Assistant.bat` does the same with a double-click, and the Tools
+   menu's **Update** runs `git pull` and then this script (`-Quiet -SkipTests`).
 2. Check SolidWorks works end to end (Tools menu option 3, or `sw-agent check`, which runs
    the script below and then zips the logs). This starts SolidWorks if needed, edits a test block,
    then builds parts from scratch (holes, pockets, repeats, a flange from one plan), checking
@@ -35,60 +38,45 @@ links the tools to OpenCode, VS Code Copilot, Gemini CLI, Claude Desktop and oth
    Send back `smoke_test_report.txt`. To test with one of your own parts, add
    `--part "C:\path\part.SLDPRT"`. A copy is used, and you will be asked to click a face.
 
-## Connecting AI models (the wizard)
+## AI models
 
-`sw-agent setup` walks through AI providers one by one: OpenRouter, Google Gemini, Groq,
-Mistral, NVIDIA, Cerebras and Hugging Face (free tiers), OpenAI (paid, pay per use), plus LM
-Studio and Ollama for models running on your own PC. `sw-agent setup openai` sets up just one
-provider. For each one it:
-1. says what you get for free and **what happens to your data**. Some free tiers may train on
-   your prompts; the wizard says so clearly, and you decide.
-2. opens the page where you sign in and create a key;
-3. takes the key (hidden while you type), checks it live, and finds which models can really use
-   tools (one tiny request per model);
-4. stores the key in **Windows Credential Manager**, never in a file.
-
-Connect several: when one provider hits its daily limit, the assistant can use another.
-`sw-agent status` shows what is connected. The provider list is `src/sw_agent/providers.toml`;
-free offers change often, and updating that file needs no code change.
+OpenCode handles the models. Its own free models (OpenCode Zen) work without any key; the
+`solidworks` agent uses `opencode/nemotron-3-ultra-free` by default (see
+`src/sw_agent/agentfile.py`). To add other providers (OpenRouter, OpenAI, Gemini, Groq ...), use
+Tools menu option 5 or `sw-agent connect` (it runs `opencode providers login`); OpenCode stores
+the keys. `sw-agent models` lists every model OpenCode can use.
 
 ## The assistant
 
-- **Browser:** `sw-agent web`, or double-click `SolidWorks Assistant.bat`. It is a local page
-  (127.0.0.1 only, protected by a per-session token) with the chat, live progress, model
-  switching and examples.
-- **Terminal:** `sw-agent`. Type `/help` for its commands.
-- **Model choice:** both try the connected models best-first and switch automatically when one
-  is rate-limited or failing.
-- **Benchmark:** `sw-agent bench` scores your connected models on three SolidWorks tasks
-  against a fake SolidWorks (no SolidWorks needed), so the best ones are tried first.
+- **Browser:** double-click `SolidWorks Assistant.bat` (or `sw-agent web`). It starts
+  `opencode serve` in the background (127.0.0.1, a random password) in this folder, so
+  `opencode.json` and the `solidworks` agent apply, and opens a local page (127.0.0.1 only,
+  protected by a per-session token). Your messages go to OpenCode's `solidworks` agent; the
+  page shows every SolidWorks step with its arguments, a readable preview of each part plan and
+  the result, answers OpenCode's permission questions (allow once, always, refuse), can stop a
+  run or pick another model, and asks for a rating after each build.
+- **Terminal:** Tools menu option 2 or `sw-agent cli` opens OpenCode itself with
+  `--agent solidworks`. (Running `opencode` in this folder does the same: the agent is the default.)
+- **Shared design:** tools that build machines keep `<project>/design.json` (checklist, parts,
+  named axes and frames, joints). The browser page passes its summary to the model with every
+  message, and `list_project` returns it.
+- **Build records:** every request made in the browser is recorded on this PC with its steps,
+  result, picture and rating. `sw-agent share` (Tools menu 7, or the page's **Share builds**)
+  packs them into one zip for the developer. No keys, file paths or user names are included.
 
-## Using it from other AI apps
+The operating guide for the model is `src/sw_mcp/guide.md`. `.opencode/agents/solidworks.md` is
+generated from it (plus the agent settings in `src/sw_agent/agentfile.py`) by `sw-agent sync`;
+a test checks that the committed copy is current. Other MCP apps can use the server too: run
+`python -m sw_mcp` (set `SW_MCP_INSTRUCTIONS=1` so the server sends the guide itself).
 
-The SolidWorks tools are a standard MCP server, so any MCP app can use them.
-`sw-agent connect` shows the steps for your apps.
-
-| App | How |
-|-----|-----|
-| **OpenCode** | Run `opencode` in this folder. The **solidworks** agent opens by default; it can only use the SolidWorks tools. Its model is set in `.opencode/agents/solidworks.md`. OpenCode's own "Free" models reject setups with tools, so use an `openrouter/...:free` model (connect OpenRouter with `opencode auth login`). |
-| **VS Code + GitHub Copilot** | Open this folder. `.vscode/mcp.json` starts the server; in Chat, pick the **SolidWorks** agent (`.github/agents/solidworks.agent.md`). |
-| **Gemini CLI** | Run `gemini` in this folder. `.gemini/settings.json` starts the server, and `GEMINI.md` holds the instructions. |
-| **Claude Desktop** | `sw-agent connect` adds the server to its config for you (a backup of the old config is kept). |
-| **Cursor, Cline, LM Studio, Windsurf, ...** | `sw-agent connect` prints the `mcpServers` snippet to paste. |
-
-All the apps get the same operating guide, `src/sw_mcp/guide.md`. Edit only that file, then
-run `sw-agent sync` to regenerate each app's copy. A test checks that the copies are current.
-Apps without their own instruction file receive the guide from the server itself
-(`SW_MCP_INSTRUCTIONS=1`).
-
-If a free model answers "temporarily rate-limited upstream", its provider is overloaded; switch
-models. To compare models, use [docs/model-test-prompts.md](docs/model-test-prompts.md).
+To compare models, use [docs/model-test-prompts.md](docs/model-test-prompts.md).
 
 **Keeping usage low:**
 - **Plan in one request:** `build_part` builds a whole part from one plan, instead of one
   request per feature.
 - **OpenCode:** `compaction.prune` drops old tool outputs from the history.
-- **Sessions:** start a new one for each new task, so old history isn't re-sent every turn.
+- **Sessions:** start a new one for each new task (the page's **New conversation**), so old
+  history isn't re-sent every turn.
 
 Ask, for example:
 
@@ -178,14 +166,10 @@ OpenCode `"type": "remote"` entry with `"url": "http://127.0.0.1:8765/mcp"`.
 
 ## Troubleshooting
 
-- **"OpenCode's free tier can only be used from within OpenCode".** You picked one of
-  OpenCode's own free models (the "Free" ones in OpenCode's list), not an OpenRouter model.
-  OpenCode's free tier currently rejects custom agents and MCP setups
-  ([anomalyco/opencode#50806](https://github.com/anomalyco/opencode/issues/50806),
-  [#49580](https://github.com/anomalyco/opencode/issues/49580)). Use an `openrouter/...:free`
-  model instead.
-- **HTTP 429 or "rate limit" from OpenRouter.** You hit the free requests-per-minute or
-  requests-per-day limit. Wait, or add credits to the OpenRouter account.
+- **A model says "rate limited" or "no credits".** That provider's free or paid limit is used
+  up. Pick another model on the page (**Models**) or in OpenCode (`/models`).
+- **The page says OpenCode did not start.** Look at `opencode-serve.log` in the logs folder
+  (Tools menu option 4 collects it), and run Tools menu option 8 to update OpenCode.
 
 - **`SW_STARTING` never ends.** SolidWorks is running but not visible to COM. Close any
   dialog box in SolidWorks. Then check that SolidWorks and OpenCode run as the same Windows
@@ -201,7 +185,8 @@ OpenCode `"type": "remote"` entry with `"url": "http://127.0.0.1:8765/mcp"`.
 ```
 The tests run without SolidWorks. `tests/fakes/fake_sw.py` is an in-memory SolidWorks object
 tree, and `tests/test_tool_schemas.py` enforces the small-model rules (flat arguments, at most
-5 per tool, docstring template, size budget).
+8 per tool, docstring template, size budget). `tests/fake_opencode.py` stands in for
+`opencode serve` (events shaped like opencode 1.18's) to test the browser page.
 
 Layout: `src/sw_mcp/core` holds threading, the connection and resilience; `src/sw_mcp/sw`
 holds the SolidWorks logic with no MCP code; `src/sw_mcp/tools` holds the thin MCP wrappers.

@@ -1,7 +1,7 @@
 # Comparing free models
 
 Run these prompts with each model, using the **solidworks** agent (the default in this folder).
-To switch models, edit the `model:` line in `.opencode/agents/solidworks.md`.
+To switch models, use **Models** on the page, or `/models` in OpenCode (Tools menu option 2).
 Start each model from the same state: SolidWorks open, the smoke-test block (or any simple part)
 open, and nothing selected. Mark a prompt as a pass only if the model called the expected tools
 and reported the numbers the tools actually returned.
@@ -24,8 +24,9 @@ Watch for these failure patterns:
 
 | Model | 1 | 2 | 3 | 4 | 5 | Notes |
 |-------|---|---|---|---|---|-------|
+| opencode/nemotron-3-ultra-free (default) | | | | | | |
 | openrouter/qwen/qwen3.8-27b:free | | | | | | |
-| openrouter/nvidia/nemotron-3-super-120b-a12b:free (default) | | | | | | |
+| openrouter/nvidia/nemotron-3-super-120b-a12b:free | | | | | | |
 | openrouter/nvidia/nemotron-3.5-lightning:free | | | | | | |
 | openrouter/google/gemma-4-31b-it:free | | | | | | |
 | openrouter/inclusionai/ling-3.0-flash-fin:free | | | | | | |

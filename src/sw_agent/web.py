@@ -1,18 +1,25 @@
-"""The browser version of the SolidWorks Assistant (`sw-agent web`).
+"""The browser version of the SolidWorks Assistant (`sw-agent web`), a front end for OpenCode.
 
-A small local web server (127.0.0.1 only) that serves one page and a JSON API. The page polls
-for events (thinking / tool / result / model / reply / review) so progress shows up while
-SolidWorks works. In review mode the assistant waits before changing SolidWorks: the page shows
-the call (a plan as readable steps), and the user runs it, edits it, skips it with a note, or
-stops. Every API call must carry the random token embedded in the page, so other websites open
-in the same browser cannot drive SolidWorks.
+On start it runs `opencode serve` in the background (project folder, so opencode.json and the
+"solidworks" agent apply) and opens a local page. Messages typed there go to OpenCode; OpenCode's
+event stream comes back as progress lines (each SolidWorks step, with its arguments and result),
+questions for permission, and the answer.
+
+Around OpenCode it adds what this project needs: the shared design of the active project and a
+well-rated similar past build are given to the model as extra instructions, every request is
+recorded for the rating/sharing flow (jobs.py), and the page can stop a run or pick a model.
+
+Security: the page and its API are on 127.0.0.1 only and every API call carries a random token
+embedded in the page; OpenCode itself is protected by its own random password.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import secrets
-import socket
+import time
 import webbrowser
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -24,28 +31,37 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
 
-from .assistant import LEAN_TOOLS, REVIEW_TOOLS, Assistant, Decision, PendingCall, Toolbox
-from .config import UserConfig
-from .logs import Transcript, setup_logging
-from .review import edited_args, preview_call
-from .router import Router
+from . import jobs
+from .logs import Transcript, log_dir, setup_logging
+from .opencode import OpenCodeClient, OpenCodeServer, free_port
+from .preview import preview_call, summarize_result
 
+log = logging.getLogger("sw_agent.web")
 POLL_WAIT_S = 20.0
 MAX_EVENTS = 2000
+PROJECT_ARGS = ("plan_machine", "make_assembly", "list_project", "make_engine")
 
 
 @dataclass
 class WebSession:
-    """Everything one browser session needs: the assistant and its event log."""
-
-    assistant: Assistant
-    router: Router
+    client: Any
+    session_id: str = ""
     events: list[dict] = field(default_factory=list)
     busy: bool = False
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     next_id: int = 1
-    pending: dict | None = None  # the call waiting for the user: {"payload", "future"}
-    next_review: int = 1
+    model: dict | None = None            # chosen by the user; None = the agent's own model
+    last_model: str = ""
+    permissions: dict[str, dict] = field(default_factory=dict)  # open permission questions
+    roles: dict[str, str] = field(default_factory=dict)         # messageID -> user/assistant
+    part_kind: dict[str, str] = field(default_factory=dict)     # partID -> text/reasoning/tool
+    texts: dict[str, dict[str, str]] = field(default_factory=dict)  # assistant messageID -> partID -> text
+    turn_messages: list[str] = field(default_factory=list)      # assistant messages of this request
+    tools: dict[str, str] = field(default_factory=dict)         # callID -> announced/done
+    job: jobs.Job | None = None
+    active_project: str | None = None
+    transcript: Any = None
+    models_cache: tuple[float, list] = (0.0, [])
 
     def push(self, kind: str, text: str, data: dict | None = None) -> None:
         event = {"id": self.next_id, "kind": kind, "text": text}
@@ -55,48 +71,208 @@ class WebSession:
         self.next_id += 1
         del self.events[:-MAX_EVENTS]
         self.changed.set()
+        if self.transcript is not None and kind not in ("thinking",):
+            self.transcript.write(kind, text, **({"data": data} if data and kind != "result" else {}))
 
 
-SessionFactory = Callable[[], Any]  # returns an async context manager yielding (router, toolbox)
+# ---------------------------------------------------------------- OpenCode events -> page events
+def note_project(s: WebSession, tool: str, args: dict) -> None:
+    save_as = str(args.get("save_as") or "").replace("\\", "/")
+    if "/" in save_as:
+        s.active_project = save_as.split("/")[0].strip() or s.active_project
+    elif tool in PROJECT_ARGS and str(args.get("project") or "").strip():
+        s.active_project = str(args["project"]).strip()
+
+
+def extra_instructions(s: WebSession, text: str) -> str:
+    """Shared design of the active project + a well-rated similar build, for the model."""
+    parts = []
+    if s.active_project:
+        try:
+            from sw_mcp.sw import design
+
+            parts.append(design.summary(s.active_project))
+        except Exception:  # noqa: BLE001
+            log.warning("could not read the design of %s", s.active_project, exc_info=True)
+    try:
+        example = jobs.similar_example(text)
+    except Exception:  # noqa: BLE001
+        example = ""
+    if example:
+        parts.append(example)
+        s.push("info", "Using a similar build you rated well as an example.")
+    return "\n\n".join(p for p in parts if p)
+
+
+def handle_event(s: WebSession, ev: dict) -> bool:
+    """Turn one OpenCode event into page events. Returns True when the request has finished."""
+    kind = ev.get("type", "")
+    props = ev.get("properties") or {}
+    if props.get("sessionID") not in (None, s.session_id):
+        return False
+    if kind == "message.updated":
+        info = props.get("info") or {}
+        s.roles[info.get("id", "")] = info.get("role", "")
+        if info.get("role") == "assistant":
+            if info["id"] not in s.turn_messages:
+                s.turn_messages.append(info["id"])
+            label = f"{info.get('providerID', '')}/{info.get('modelID', '')}".strip("/")
+            if label and label != s.last_model:
+                s.last_model = label
+                s.push("model", f"Model: {label}")
+            if s.job is not None and info.get("time", {}).get("completed"):
+                s.job.model(label, {"prompt_tokens": (info.get("tokens") or {}).get("input"),
+                                    "completion_tokens": (info.get("tokens") or {}).get("output")})
+            if info.get("error"):
+                data = info["error"].get("data") or {}
+                s.push("error", str(data.get("message") or info["error"].get("name") or "The model reported an error."))
+    elif kind == "message.part.updated":
+        part = props.get("part") or {}
+        pid, ptype = part.get("id", ""), part.get("type", "")
+        s.part_kind[pid] = ptype
+        if ptype == "text" and s.roles.get(part.get("messageID")) != "user":
+            s.texts.setdefault(part.get("messageID", ""), {})[pid] = part.get("text", "")
+        elif ptype == "tool":
+            handle_tool(s, part)
+    elif kind == "message.part.delta":
+        pid = props.get("partID", "")
+        if s.part_kind.get(pid) == "text" and props.get("field") == "text":
+            texts = s.texts.setdefault(props.get("messageID", ""), {})
+            texts[pid] = texts.get(pid, "") + str(props.get("delta", ""))
+    elif kind == "permission.asked":
+        s.permissions[props.get("id", "")] = props
+        s.push("permission", describe_permission(props), {"id": props.get("id"), "permission": props.get("permission"),
+                                                          "patterns": props.get("patterns") or [],
+                                                          "metadata": props.get("metadata") or {}})
+    elif kind == "permission.replied":
+        s.permissions.pop(props.get("requestID", ""), None)
+    elif kind == "session.status":
+        if (props.get("status") or {}).get("type") == "busy":
+            s.busy = True
+            s.push("thinking", "thinking")
+    elif kind == "session.error":
+        err = props.get("error") or {}
+        s.push("error", str((err.get("data") or {}).get("message") or err.get("name") or "OpenCode reported an error."))
+    elif kind == "session.idle":
+        return True
+    return False
+
+
+def handle_tool(s: WebSession, part: dict) -> None:
+    state = part.get("state") or {}
+    status = state.get("status")
+    call_id = part.get("callID") or part.get("id", "")
+    name = str(part.get("tool", "")).removeprefix("solidworks_")
+    args = state.get("input") or {}
+    if status in ("running", "completed", "error") and call_id not in s.tools:
+        s.tools[call_id] = "announced"
+        note_project(s, name, args)
+        data: dict[str, Any] = {"args": args}
+        preview = preview_call(name, args)
+        if preview:
+            data["preview"] = preview
+        s.push("tool", name, data)
+    if status in ("completed", "error") and s.tools.get(call_id) != "done":
+        s.tools[call_id] = "done"
+        output = state.get("output") if status == "completed" else json.dumps(
+            {"ok": False, "error": "TOOL_ERROR", "message": str(state.get("error", ""))})
+        output = output if isinstance(output, str) else json.dumps(output)
+        s.push("result", summarize_result(output), {"output": output[:20000]})
+        if s.job is not None:
+            times = state.get("time") or {}
+            seconds = ((times.get("end") or 0) - (times.get("start") or 0)) / 1000
+            s.job.step(name, args, output, s.last_model, max(seconds, 0.0))
+
+
+def describe_permission(props: dict) -> str:
+    what = props.get("permission", "something")
+    patterns = ", ".join(props.get("patterns") or [])
+    return f"OpenCode asks to use {what}" + (f": {patterns}" if patterns else "")
+
+
+def final_reply(s: WebSession) -> str:
+    texts = []
+    for mid in s.turn_messages:
+        texts.extend(t for t in (s.texts.get(mid) or {}).values() if t.strip())
+    return (texts[-1] if texts else "").strip()
+
+
+async def finish_request(s: WebSession) -> None:
+    reply = final_reply(s)
+    if reply:
+        s.push("reply", reply)
+    job, s.job = s.job, None
+    s.busy = False
+    if job is not None:
+        await asyncio.to_thread(save_job, job, reply, s.active_project)
+        s.push("job", job.id, {"id": job.id, "changed": job.changed})
+    s.push("idle", "")
+
+
+def save_job(job: jobs.Job, reply: str, project: str | None) -> None:
+    try:
+        picture = None
+        if job.changed:
+            folder = jobs.jobs_dir() / job.id
+            folder.mkdir(parents=True, exist_ok=True)
+            try:
+                from sw_mcp.tools.documents import save_picture
+
+                out = json.loads(save_picture(file_path=str(folder / "picture.png")))
+                picture = out.get("picture") if out.get("ok") else None
+            except Exception:  # noqa: BLE001 - the picture is optional
+                log.info("no picture for the job record", exc_info=True)
+        design_data = None
+        if project:
+            from sw_mcp.sw import design
+
+            design_data = design.load(project)
+        job.finish(reply, project, design_data, picture)
+    except Exception:  # noqa: BLE001 - a record must never break the page
+        log.warning("could not save the job record", exc_info=True)
+
+
+async def pump(s: WebSession) -> None:
+    async for ev in s.client.events():
+        try:
+            if handle_event(s, ev) and s.busy:
+                await finish_request(s)
+        except Exception:  # noqa: BLE001 - one odd event must not stop the stream
+            log.warning("could not handle an OpenCode event: %s", str(ev)[:300], exc_info=True)
+
+
+# ---------------------------------------------------------------- the app
+Backend = Callable[[], Any]  # an async context manager yielding an OpenCodeClient
 
 
 @asynccontextmanager
-async def default_backend():
-    config = UserConfig.load()
-    router = Router(config)
-    async with Toolbox(LEAN_TOOLS) as toolbox:
-        yield router, toolbox
+async def opencode_backend():
+    server = OpenCodeServer(log_file=log_dir() / "opencode-serve.log")
+    await asyncio.to_thread(server.start)
+    client = server.client()
+    try:
+        yield client
+    finally:
+        await client.close()
+        await asyncio.to_thread(server.stop)
 
 
-def create_app(backend: SessionFactory = default_backend, token: str | None = None,
+def create_app(backend: Backend = opencode_backend, token: str | None = None,
                transcript_factory: Callable[[], Any] = lambda: None) -> Starlette:
     token = token or secrets.token_urlsafe(24)
     state: dict[str, WebSession] = {}
 
     @asynccontextmanager
     async def lifespan(app: Starlette):
-        async with backend() as (router, toolbox):
-            session = WebSession(assistant=None, router=router)  # type: ignore[arg-type]
-
-            async def approve(call: PendingCall) -> Decision:
-                future: asyncio.Future = asyncio.get_running_loop().create_future()
-                payload = {"id": session.next_review, "name": call.name, "args": call.args, "model": call.model,
-                           "reason": call.reason, "preview": preview_call(call.name, call.args)}
-                session.next_review += 1
-                session.pending = {"payload": payload, "future": future}
-                session.push("review", f"Waiting for you: {call.name}", payload)
-                try:
-                    return await future
-                finally:
-                    session.pending = None
-
-            session.assistant = Assistant(router, toolbox, on_event=lambda e: session.push(e.kind, e.text, e.data),
-                                          transcript=transcript_factory(), approver=approve, interface="browser")
-            state["s"] = session
-            if not router.candidates():
-                session.push("error", "No AI model is connected yet. Close this window and run "
-                                      "'sw-agent setup' (or re-run the installer), then start again.")
-            yield
+        async with backend() as client:
+            s = WebSession(client=client, transcript=transcript_factory())
+            s.session_id = (await client.create_session())["id"]
+            state["s"] = s
+            task = asyncio.create_task(pump(s))
+            try:
+                yield
+            finally:
+                task.cancel()
 
     def authorized(request: Request) -> bool:
         return secrets.compare_digest(request.headers.get("x-token", ""), token)
@@ -118,18 +294,16 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
         if s.busy:
             return JSONResponse({"ok": False, "error": "busy"}, status_code=409)
         s.busy = True
+        s.turn_messages, s.texts, s.tools = [], {}, {}
+        s.job = jobs.Job(text, "browser")
         s.push("user", text)
-
-        async def run() -> None:
-            try:
-                await s.assistant.send(text)
-            except Exception as exc:  # noqa: BLE001 - show it instead of dying silently
-                s.push("error", f"Something went wrong: {exc}")
-            finally:
-                s.busy = False
-                s.push("idle", "")
-
-        asyncio.get_running_loop().create_task(run())
+        try:
+            await s.client.prompt(s.session_id, text, s.model, extra_instructions(s, text))
+        except Exception as exc:  # noqa: BLE001 - show it instead of hanging
+            s.busy, s.job = False, None
+            s.push("error", f"OpenCode did not take the message: {exc}")
+            s.push("idle", "")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
         return JSONResponse({"ok": True})
 
     async def events(request: Request) -> JSONResponse:
@@ -137,8 +311,7 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
             return denied()
         s = state["s"]
         after = int(request.query_params.get("after", "0") or 0)
-        wait = request.query_params.get("wait", "1") != "0"
-        if wait and not any(e["id"] > after for e in s.events):
+        if request.query_params.get("wait", "1") != "0" and not any(e["id"] > after for e in s.events):
             s.changed.clear()
             try:
                 await asyncio.wait_for(s.changed.wait(), POLL_WAIT_S)
@@ -150,49 +323,61 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
         if not authorized(request):
             return denied()
         s = state["s"]
-        models = [{"n": i, "provider": p, "model": m, "state": st} for i, (p, m, st) in enumerate(s.router.status(), 1)]
-        return JSONResponse({"models": models, "busy": s.busy, "pinned": bool(s.router.pinned),
-                             "review": s.assistant.review, "pending": s.pending["payload"] if s.pending else None})
+        when, models = s.models_cache
+        if time.monotonic() - when > 60 or not models:
+            try:
+                models = await s.client.models()
+                s.models_cache = (time.monotonic(), models)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("could not list the models: %s", exc)
+        return JSONResponse({"models": models, "chosen": s.model, "last_model": s.last_model, "busy": s.busy,
+                             "permissions": list(s.permissions.values()), "project": s.active_project})
 
-    async def providers(request: Request) -> JSONResponse:
-        """Providers the user can pick a model from (a key is stored, or it runs on this PC)."""
+    async def control(request: Request) -> JSONResponse:
         if not authorized(request):
             return denied()
         s = state["s"]
-        rows = [{"id": p.id, "name": p.name, "paid": p.paid} for p in s.router.providers.values()
-                if s.router.has_key(p.id)]
-        manual = dict(s.router.config.manual or {})
-        return JSONResponse({"providers": rows, "manual": manual,
-                             "openai_tools": s.router.config.openai_tools or {}})
+        body = await request.json()
+        action = body.get("action")
+        if action == "new":
+            if s.busy:
+                return JSONResponse({"ok": False, "error": "busy"}, status_code=409)
+            s.session_id = (await s.client.create_session())["id"]
+            s.active_project, s.roles, s.part_kind = None, {}, {}
+            s.push("info", "New conversation.")
+        elif action == "stop":
+            if not s.busy:
+                return JSONResponse({"ok": False, "error": "nothing is running"}, status_code=409)
+            await s.client.abort(s.session_id)
+            s.push("info", "Stopping...")
+        elif action == "use":
+            pid, mid = str(body.get("providerID", "")), str(body.get("modelID", ""))
+            if not pid or not mid:
+                return JSONResponse({"ok": False, "error": "choose a model"}, status_code=400)
+            s.model = {"providerID": pid, "modelID": mid}
+            s.push("info", f"Using {pid}/{mid} from the next message on.")
+        elif action == "auto":
+            s.model = None
+            s.push("info", "Using the SolidWorks agent's own model.")
+        else:
+            return JSONResponse({"ok": False, "error": "unknown action"}, status_code=400)
+        return JSONResponse({"ok": True})
 
-    async def models(request: Request) -> JSONResponse:
-        """The models a provider offers right now (asked live), best-suited first."""
+    async def permission(request: Request) -> JSONResponse:
         if not authorized(request):
             return denied()
         s = state["s"]
-        pid = request.query_params.get("provider", "")
-        provider = s.router.providers.get(pid)
-        if provider is None or not s.router.has_key(pid):
-            return JSONResponse({"ok": False, "error": "unknown provider or no key"}, status_code=400)
-
-        def ask() -> list[str]:
-            from .probe import rank_models
-
-            return rank_models(provider, s.router.client_for(provider).list_models())
-
-        try:
-            listed = await asyncio.to_thread(ask)
-        except Exception as exc:  # noqa: BLE001 - show the reason instead of failing the page
-            return JSONResponse({"ok": False, "error": f"Could not list the models: {exc}"})
-        tested = {m.id for m in (s.router.config.providers.get(pid).models if pid in s.router.config.providers else [])
-                  if m.tools_ok}
-        return JSONResponse({"ok": True, "models": listed[:300], "tested": sorted(tested)})
+        body = await request.json()
+        rid, reply = str(body.get("id", "")), body.get("reply")
+        if rid not in s.permissions or reply not in ("once", "always", "reject"):
+            return JSONResponse({"ok": False, "error": "nothing to answer"}, status_code=409)
+        await s.client.reply_permission(rid, reply, str(body.get("message", ""))[:500])
+        s.permissions.pop(rid, None)
+        return JSONResponse({"ok": True})
 
     async def rate(request: Request) -> JSONResponse:
         if not authorized(request):
             return denied()
-        from . import jobs
-
         body = await request.json()
         try:
             rating = jobs.rate(str(body.get("id", "")), int(body.get("stars", 0)),
@@ -204,97 +389,12 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
     async def share(request: Request) -> JSONResponse:
         if not authorized(request):
             return denied()
-        from . import jobs
         from .logs import reveal
 
         path, count = await asyncio.to_thread(jobs.pack)
         if request.query_params.get("open", "1") != "0":
             reveal(path)
         return JSONResponse({"ok": True, "path": str(path), "jobs": count})
-
-    async def context(request: Request) -> JSONResponse:
-        if not authorized(request):
-            return denied()
-        return JSONResponse(state["s"].assistant.context())
-
-    async def preview(request: Request) -> JSONResponse:
-        if not authorized(request):
-            return denied()
-        body = await request.json()
-        args = edited_args({}, body.get("args"))
-        return JSONResponse(preview_call(str(body.get("name", "")), args) or {"ok": True})
-
-    async def review(request: Request) -> JSONResponse:
-        if not authorized(request):
-            return denied()
-        s = state["s"]
-        body = await request.json()
-        pending = s.pending
-        if pending is None or body.get("id") != pending["payload"]["id"] or pending["future"].done():
-            return JSONResponse({"ok": False, "error": "nothing is waiting for you"}, status_code=409)
-        action = body.get("action")
-        if action not in ("run", "skip", "stop"):
-            return JSONResponse({"ok": False, "error": "unknown action"}, status_code=400)
-        args = edited_args(pending["payload"]["args"], body.get("args")) if action == "run" else None
-        pending["future"].set_result(Decision(action, args, str(body.get("note", ""))[:1000]))
-        return JSONResponse({"ok": True})
-
-    async def control(request: Request) -> JSONResponse:
-        if not authorized(request):
-            return denied()
-        s = state["s"]
-        body = await request.json()
-        action = body.get("action")
-        if action == "new":
-            if s.busy:
-                return JSONResponse({"ok": False, "error": "busy"}, status_code=409)
-            s.assistant.reset()
-            s.push("info", "New conversation.")
-        elif action == "use":
-            cands = s.router.candidates()
-            n = int(body.get("n", 0))
-            if not 1 <= n <= len(cands):
-                return JSONResponse({"ok": False, "error": "no such model"}, status_code=400)
-            s.router.pin(cands[n - 1].provider.id, cands[n - 1].model)
-            s.push("info", f"Using {cands[n - 1].label} first.")
-        elif action == "auto":
-            s.router.unpin(remember=True)
-            s.push("info", "Automatic model choice.")
-        elif action == "pick":
-            pid, model = str(body.get("provider", "")), str(body.get("model", "")).strip()
-            if not model or pid not in s.router.providers or not s.router.has_key(pid):
-                return JSONResponse({"ok": False, "error": "choose a connected provider and a model"}, status_code=400)
-            only = bool(body.get("only"))
-            s.router.pin(pid, model, only=only, remember=True)
-            s.push("info", f"Using {s.router.providers[pid].name} / {model}"
-                           + (" only (no switching)." if only else " first."))
-        elif action == "openai_tools":
-            tools = {"internet": bool(body.get("internet")), "terminal": bool(body.get("terminal"))}
-            s.router.config.openai_tools = tools
-            try:
-                s.router.config.save()
-            except OSError:
-                pass
-            s.push("info", "OpenAI models: internet " + ("ON" if tools["internet"] else "off") + ", terminal commands "
-                   + ("ON (each command waits for your OK)" if tools["terminal"] else "off") + ".")
-        elif action == "stop":
-            if not s.busy:
-                return JSONResponse({"ok": False, "error": "nothing is running"}, status_code=409)
-            s.assistant.request_stop()
-            if s.pending and not s.pending["future"].done():
-                s.pending["future"].set_result(Decision("stop"))
-            s.push("info", "Stopping after the current step...")
-        elif action == "review":
-            mode = body.get("mode")
-            if mode not in REVIEW_TOOLS:
-                return JSONResponse({"ok": False, "error": "unknown mode"}, status_code=400)
-            s.assistant.review = mode
-            s.push("info", {"off": "Review is off: I build without asking.",
-                            "builds": "Review is on: I show you each plan before building it.",
-                            "all": "Review everything: I ask before every change in SolidWorks."}[mode])
-        else:
-            return JSONResponse({"ok": False, "error": "unknown action"}, status_code=400)
-        return JSONResponse({"ok": True})
 
     return Starlette(
         routes=[
@@ -303,27 +403,12 @@ def create_app(backend: SessionFactory = default_backend, token: str | None = No
             Route("/api/events", events),
             Route("/api/status", status),
             Route("/api/control", control, methods=["POST"]),
-            Route("/api/context", context),
+            Route("/api/permission", permission, methods=["POST"]),
             Route("/api/rate", rate, methods=["POST"]),
             Route("/api/share", share, methods=["POST"]),
-            Route("/api/providers", providers),
-            Route("/api/models", models),
-            Route("/api/preview", preview, methods=["POST"]),
-            Route("/api/review", review, methods=["POST"]),
         ],
         lifespan=lifespan,
     )
-
-
-def free_port(preferred: int = 8777) -> int:
-    for port in (preferred, 0):
-        with socket.socket() as sock:
-            try:
-                sock.bind(("127.0.0.1", port))
-                return sock.getsockname()[1]
-            except OSError:
-                continue
-    return preferred
 
 
 def main(open_browser: bool = True, port: int | None = None) -> int:
@@ -332,11 +417,12 @@ def main(open_browser: bool = True, port: int | None = None) -> int:
     setup_logging()
     port = port or free_port()
     url = f"http://127.0.0.1:{port}/"
-    print(f"SolidWorks Assistant is running at {url}  (close this window to stop it)")
+    print("Starting OpenCode in the background, then the page opens in your browser...")
+    print(f"SolidWorks Assistant: {url}  (close this window to stop it)")
     if open_browser:
         import threading
 
-        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+        threading.Timer(4.0, lambda: webbrowser.open(url)).start()
     uvicorn.run(create_app(transcript_factory=lambda: Transcript("browser")), host="127.0.0.1", port=port,
                 log_level="warning")
     return 0

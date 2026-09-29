@@ -4,8 +4,10 @@
   every model request (provider, model, time, tokens) and every error.
 - Conversations: %LOCALAPPDATA%\\sw_mcp\\conversations\\<date>_<time>.jsonl, one line per event
   (what you typed, each step, each answer). Kept on this PC only.
-- `sw-agent logs` zips the logs, recent conversations, the provider test results and the
-  smoke test report onto the Desktop. API keys are never included (they are not in any file).
+- OpenCode: the background server's output (opencode-serve.log, same folder) and OpenCode's own
+  logs (~/.local/share/opencode/log).
+- `sw-agent logs` zips all of it, recent conversations and the smoke test report onto the Desktop.
+  API keys are never included (OpenCode keeps them in its own auth file, which is not collected).
 """
 
 from __future__ import annotations
@@ -76,6 +78,16 @@ class Transcript:
             pass
 
 
+def _opencode_version() -> str:
+    try:
+        from .opencode import find_opencode, version
+
+        exe = find_opencode()
+        return f"{version(exe)} ({exe})" if exe else "not installed"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
 def reveal(path: Path) -> None:
     """Open File Explorer with the file selected, and copy its path to the clipboard."""
     import subprocess
@@ -97,14 +109,17 @@ def collect(dest_folder: Path | None = None, max_conversations: int = 20) -> Pat
     zip_path = dest_folder / f"SolidWorks Assistant logs {datetime.now():%Y-%m-%d %H%M}.zip"
     project_root = Path(__file__).resolve().parents[2]
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in sorted(log_dir().glob("sw_mcp.log*")):
+        for f in sorted(log_dir().glob("sw_mcp.log*")) + sorted(log_dir().glob("opencode-serve.log*")):
             zf.write(f, f"logs/{f.name}")
+        oc_logs = Path(os.path.expanduser("~")) / ".local" / "share" / "opencode" / "log"
+        for f in sorted(oc_logs.glob("*.log"), key=lambda p: p.stat().st_mtime)[-3:]:
+            zf.write(f, f"opencode/{f.name}")
         convs = sorted((log_dir() / "conversations").glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
         for f in convs[-max_conversations:]:
             zf.write(f, f"conversations/{f.name}")
-        cfg = Path(os.environ.get("SW_AGENT_HOME") or Path(os.environ.get("APPDATA", "")) / "sw_agent") / "config.json"
-        if cfg.exists():
-            zf.write(cfg, "provider_tests.json")  # models and scores only; keys are not in this file
+        for rel in ("opencode.json", ".opencode/agents/solidworks.md"):
+            if (project_root / rel).exists():
+                zf.write(project_root / rel, f"config/{Path(rel).name}")
         report = project_root / "smoke_test_report.txt"
         if report.exists():
             zf.write(report, "smoke_test_report.txt")
@@ -112,6 +127,7 @@ def collect(dest_folder: Path | None = None, max_conversations: int = 20) -> Pat
             f"collected: {datetime.now().isoformat(timespec='seconds')}",
             f"python: {sys.version}",
             f"platform: {platform.platform()}",
+            f"opencode: {_opencode_version()}",
             f"project: {project_root}",
             f"timezone offset: {time.strftime('%z')}",
         ]))
